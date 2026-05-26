@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 
 import { useSdk } from "@/components/wallet/SdkProvider";
@@ -14,16 +15,55 @@ type AvatarLike = {
   };
 };
 
-/** Below this CRC value we treat the claim as "nothing meaningful to mint". */
+/** Min CRC the protocol must have accrued before the button is enabled. */
 const MIN_CLAIMABLE_CRC = 0.05;
+/** Daily cap on self-feeds. Past this, we redirect the user to the leaderboard. */
+const DAILY_SELF_FEED_LIMIT = 2;
 const POLL_INTERVAL_MS = 30_000;
 
+/* ── Local daily counter helpers ─────────────────────────────── */
+
+function todayIso(): string {
+  return new Date().toISOString().slice(0, 10);
+}
+
+type DailyCounter = { date: string; count: number };
+
+function readCounter(address: string): DailyCounter {
+  const fallback: DailyCounter = { date: todayIso(), count: 0 };
+  if (typeof window === "undefined") return fallback;
+  try {
+    const raw = window.localStorage.getItem(
+      `hatch_self_feeds_${address.toLowerCase()}`,
+    );
+    if (!raw) return fallback;
+    const parsed = JSON.parse(raw) as DailyCounter;
+    if (parsed.date !== fallback.date) return fallback;
+    return parsed;
+  } catch {
+    return fallback;
+  }
+}
+
+function writeCounter(address: string, value: DailyCounter) {
+  if (typeof window === "undefined") return;
+  window.localStorage.setItem(
+    `hatch_self_feeds_${address.toLowerCase()}`,
+    JSON.stringify(value),
+  );
+}
+
 /**
- * Triggers the user's daily Circles mint, but only when there's a
- * meaningful amount actually accrued. Circles V2 mints continuously
- * (~1 CRC/hour), so naive spam-clicks would each claim a few thousandths
- * of a CRC — visually invisible and confusing. The button polls
- * personalToken.getMintableAmount() and gates on it.
+ * Daily-mint button with two gates:
+ *   1. Protocol gate     — at least MIN_CLAIMABLE_CRC accrued (otherwise
+ *                          spam-clicks would each mint a few thousandths
+ *                          and confuse the user)
+ *   2. Social gate       — at most DAILY_SELF_FEED_LIMIT self-feeds per
+ *                          day per wallet. Past that, the button is
+ *                          replaced by a "go feed someone else" CTA that
+ *                          pushes the user to /leaderboard — the social
+ *                          loop ("regarde les autres") that the spec
+ *                          calls for.
  */
 export function FeedButton({
   onSuccess,
@@ -38,6 +78,18 @@ export function FeedButton({
   const [state, setState] = useState<State>("idle");
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [mintable, setMintable] = useState<number | null>(null);
+  const [counter, setCounter] = useState<DailyCounter>({
+    date: todayIso(),
+    count: 0,
+  });
+
+  // Load the daily counter when the wallet is known.
+  useEffect(() => {
+    if (sdk.kind === "ready" && sdk.address) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setCounter(readCounter(sdk.address));
+    }
+  }, [sdk]);
 
   const refreshMintable = useCallback(async () => {
     if (sdk.kind !== "ready" || !sdk.avatar) return;
@@ -53,17 +105,66 @@ export function FeedButton({
   }, [sdk]);
 
   useEffect(() => {
-    // Fire-and-forget: refreshMintable awaits its own state set inside,
-    // so this isn't a synchronous setState from the effect body.
     // eslint-disable-next-line react-hooks/set-state-in-effect
     refreshMintable();
     const iv = setInterval(refreshMintable, POLL_INTERVAL_MS);
     return () => clearInterval(iv);
   }, [refreshMintable]);
 
+  const capped = counter.count >= DAILY_SELF_FEED_LIMIT;
   const hasClaimable = (mintable ?? 0) >= MIN_CLAIMABLE_CRC;
-  const enabled =
-    sdk.kind === "ready" && sdk.hasAvatar && state !== "minting" && hasClaimable;
+
+  const handleFeed = async () => {
+    if (sdk.kind !== "ready" || !sdk.hasAvatar || !sdk.avatar) return;
+    if (capped || !hasClaimable) return;
+
+    setState("minting");
+    setErrorMsg(null);
+    squish();
+
+    try {
+      const avatar = sdk.avatar as AvatarLike;
+      await avatar.personalToken.mint();
+
+      // Bump the daily counter.
+      const next: DailyCounter = {
+        date: todayIso(),
+        count: counter.count + 1,
+      };
+      writeCounter(sdk.address, next);
+      setCounter(next);
+
+      setState("success");
+      onSuccess();
+      setTimeout(() => {
+        refreshMintable();
+        setState("idle");
+      }, 2200);
+    } catch (err) {
+      setState("error");
+      setErrorMsg(err instanceof Error ? err.message : String(err));
+      setTimeout(() => setState("idle"), 3500);
+    }
+  };
+
+  // ── Render: post-cap CTA replaces the button entirely. ────────
+  if (capped) {
+    return (
+      <div className={className}>
+        <Link
+          href="/leaderboard"
+          className="btn-pixel font-pixel flex w-full items-center justify-center gap-2 rounded-md bg-[var(--gold)] px-6 py-3.5 text-xs uppercase tracking-wider text-[oklch(0.16_0.045_245)] hover:bg-[oklch(0.85_0.15_78)]"
+        >
+          <span aria-hidden className="text-lg leading-none">🏆</span>
+          <span>Go feed someone else →</span>
+        </Link>
+        <p className="font-pixel mt-2 text-center text-[9px] uppercase tracking-wider text-muted-foreground">
+          You&apos;ve fed your own blob {counter.count}/{DAILY_SELF_FEED_LIMIT} times today
+          — check the leaderboard.
+        </p>
+      </div>
+    );
+  }
 
   const label =
     state === "minting"
@@ -76,32 +177,14 @@ export function FeedButton({
       ? "Checking…"
       : hasClaimable
       ? `Feed · Claim ${mintable.toFixed(2)} CRC`
-      : "Already fed today";
+      : "Already fed for now";
 
-  const handleFeed = async () => {
-    if (sdk.kind !== "ready" || !sdk.hasAvatar || !sdk.avatar) return;
-    if (!hasClaimable) return;
-
-    setState("minting");
-    setErrorMsg(null);
-    squish();
-
-    try {
-      const avatar = sdk.avatar as AvatarLike;
-      await avatar.personalToken.mint();
-      setState("success");
-      onSuccess();
-      // Re-poll mintable so the button flips to "Already fed today".
-      setTimeout(() => {
-        refreshMintable();
-        setState("idle");
-      }, 2200);
-    } catch (err) {
-      setState("error");
-      setErrorMsg(err instanceof Error ? err.message : String(err));
-      setTimeout(() => setState("idle"), 3500);
-    }
-  };
+  const enabled =
+    sdk.kind === "ready" &&
+    sdk.hasAvatar &&
+    state !== "minting" &&
+    hasClaimable &&
+    !capped;
 
   return (
     <div className={className}>
@@ -123,6 +206,11 @@ export function FeedButton({
       {state === "idle" && !hasClaimable && mintable !== null && (
         <p className="font-pixel mt-2 text-center text-[9px] uppercase tracking-wider text-muted-foreground">
           Personal CRC accrues at ~1/hour — come back later
+        </p>
+      )}
+      {state === "idle" && hasClaimable && (
+        <p className="font-pixel mt-2 text-center text-[9px] uppercase tracking-wider text-muted-foreground">
+          Self-feeds today: {counter.count}/{DAILY_SELF_FEED_LIMIT}
         </p>
       )}
     </div>
