@@ -11,7 +11,21 @@ type TrustRow = {
   relation: "trusts" | "trustedBy" | "mutuallyTrusts";
 };
 
-type HistoryRow = { from?: string; to?: string; crc?: number };
+type HistoryRow = {
+  from?: string;
+  to?: string;
+  // Indexer returns numerics as JSON strings — coerce before arithmetic.
+  crc?: number | string;
+  staticCircles?: number | string;
+};
+
+function rowAmount(r: HistoryRow): number {
+  const primary = Number(r.crc ?? 0);
+  if (Number.isFinite(primary) && primary > 0) return primary;
+  const fallback = Number(r.staticCircles ?? 0);
+  if (Number.isFinite(fallback) && fallback > 0) return fallback;
+  return 0;
+}
 
 type ProfileViewMini = { profile?: { name?: string } };
 
@@ -118,7 +132,7 @@ export function useFriendsLeaderboard(): {
               const me = addr.toLowerCase();
               for (const row of history.value.results ?? []) {
                 if (row.to?.toLowerCase() === me) {
-                  xp += row.crc ?? 0;
+                  xp += rowAmount(row);
                   const from = row.from?.toLowerCase();
                   if (from && from !== me) feeders.add(from);
                 }

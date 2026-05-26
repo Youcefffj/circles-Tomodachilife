@@ -7,10 +7,20 @@ import { useSdk } from "@/components/wallet/SdkProvider";
 type HistoryRow = {
   from?: string;
   to?: string;
-  crc?: number;
+  // Indexer returns numerics as JSON strings — coerce before storing.
+  crc?: number | string;
+  staticCircles?: number | string;
   timestamp?: number;
   transactionHash?: string;
 };
+
+function rowAmount(r: HistoryRow): number {
+  const primary = Number(r.crc ?? 0);
+  if (Number.isFinite(primary) && primary > 0) return primary;
+  const fallback = Number(r.staticCircles ?? 0);
+  if (Number.isFinite(fallback) && fallback > 0) return fallback;
+  return 0;
+}
 
 type SdkRead = {
   rpc: {
@@ -82,7 +92,7 @@ export function useFeedEvents(limit = 30): {
             rows.push({
               kind: "in",
               counterparty: r.from!,
-              crc: r.crc ?? 0,
+              crc: rowAmount(r),
               timestamp: r.timestamp,
               txHash: r.transactionHash,
             });
@@ -90,7 +100,7 @@ export function useFeedEvents(limit = 30): {
             rows.push({
               kind: "out",
               counterparty: r.to!,
-              crc: r.crc ?? 0,
+              crc: rowAmount(r),
               timestamp: r.timestamp,
               txHash: r.transactionHash,
             });

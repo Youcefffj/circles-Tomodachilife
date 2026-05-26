@@ -8,10 +8,25 @@ import { stageFromXp, type Stage } from "@/lib/hatch";
 type HistoryRow = {
   from?: string;
   to?: string;
-  crc?: number;
+  /**
+   * The indexer returns numeric fields as JSON strings ("1.5") even
+   * though the SDK types claim `number`. Always coerce via Number()
+   * before arithmetic — `0 + "1.5"` is string concatenation in JS,
+   * which silently corrupts the XP sum and locks the stage at egg.
+   */
+  crc?: number | string;
+  staticCircles?: number | string;
   timestamp?: number;
   transactionHash?: string;
 };
+
+function rowAmount(r: HistoryRow): number {
+  const primary = Number(r.crc ?? 0);
+  if (Number.isFinite(primary) && primary > 0) return primary;
+  const fallback = Number(r.staticCircles ?? 0);
+  if (Number.isFinite(fallback) && fallback > 0) return fallback;
+  return 0;
+}
 
 type SdkRead = {
   rpc: {
@@ -94,7 +109,7 @@ export function useBlobProgress(): BlobProgress {
         const feedersSet = new Set<string>();
 
         for (const r of incoming) {
-          xp += r.crc ?? 0;
+          xp += rowAmount(r);
           const from = r.from?.toLowerCase();
           if (from && from !== me) feedersSet.add(from);
           if (r.timestamp != null) {
