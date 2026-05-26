@@ -8,7 +8,6 @@ import { stageFromXp, type Stage } from "@/lib/hatch";
 type HistoryRow = {
   from?: string;
   to?: string;
-  // RPC returns numeric fields as strings — coerce before arithmetic.
   crc?: number | string;
   staticCircles?: number | string;
 };
@@ -46,19 +45,19 @@ export type LeaderboardRow = {
   isMe: boolean;
 };
 
-const MAX_ROWS = 50; // cap fan-out to keep the indexer happy
+const MAX_ROWS = 50;
 
 /**
  * Global Hatch leaderboard.
  *
- * Fetches the list of every Hatch user from `/api/users` (a Redis set
- * populated whenever someone signs in or saves egg state), then in
- * parallel pulls each one's transaction history + profile to compute
- * their XP. Sorts XP desc. The current user is always included.
+ * Works in two modes:
+ *   • Connected: uses the wallet-bound SDK + force-includes the user
+ *   • Anonymous: builds an on-the-fly read-only SDK (no runner needed)
  *
- * Capped at MAX_ROWS to bound fan-out. Tuned for Garage MVP scale —
- * if the user count grows beyond a few hundred we'd want a server-
- * side aggregation pass instead.
+ * In both modes the directory comes from /api/users (Redis SET populated
+ * on chat sign-in / egg-state save) and we fan out the same history +
+ * profile RPC calls per address. Anonymous mode skips the 'isMe' flag
+ * since there's no current user.
  */
 export function useFriendsLeaderboard(): {
   rows: LeaderboardRow[];
@@ -70,48 +69,53 @@ export function useFriendsLeaderboard(): {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const ready = sdkState.kind === "ready";
+  // Drop a stable dep value so the effect doesn't refire on every render.
   const myAddress = sdkState.kind === "ready" ? sdkState.address : null;
-  const sdkRef = useMemo(
+  const connectedSdk = useMemo(
     () => (sdkState.kind === "ready" ? (sdkState.sdk as SdkRead) : null),
     [sdkState],
   );
 
   useEffect(() => {
-    if (!ready || !sdkRef || !myAddress) {
-      // eslint-disable-next-line react-hooks/set-state-in-effect
-      setRows([]);
-      return;
-    }
-
     let cancelled = false;
     const load = async () => {
       setLoading(true);
       setError(null);
 
       try {
-        // 1. Pull the global directory.
+        // ── Resolve the SDK we'll use for reads ─────────────────
+        let sdkInstance: SdkRead;
+        if (connectedSdk) {
+          sdkInstance = connectedSdk;
+        } else {
+          // Anonymous read-only instance — no runner needed, the indexer
+          // RPC accepts everyone.
+          const { Sdk } = await import("@aboutcircles/sdk");
+          sdkInstance = new (Sdk as new () => unknown)() as SdkRead;
+        }
+
+        // ── Directory of every Hatch user (public registry) ─────
         const res = await fetch("/api/users", { cache: "no-store" });
         const data = (await res.json()) as { users?: string[] };
         const directory = new Set<string>(
           (data.users ?? []).map((a) => a.toLowerCase()),
         );
 
-        // Always include the current user, even if registration hasn't
-        // landed in the SET yet (first connect, pre sign-in, etc.).
-        directory.add(myAddress.toLowerCase());
+        // Force-include the current user if we have one (in case
+        // their SADD hasn't landed yet — e.g. first connect).
+        if (myAddress) directory.add(myAddress.toLowerCase());
 
         const addresses = Array.from(directory).slice(0, MAX_ROWS);
 
-        // 2. Fan-out: per-user history + profile, parallel.
+        // ── Fan-out: history + profile per address, parallel ────
         const results: LeaderboardRow[] = await Promise.all(
           addresses.map(async (addr) => {
             const [history, profile] = await Promise.allSettled([
-              sdkRef.rpc.transaction.getTransactionHistory(
+              sdkInstance.rpc.transaction.getTransactionHistory(
                 addr as `0x${string}`,
                 100,
               ),
-              sdkRef.rpc.profile.getProfileView(addr as `0x${string}`),
+              sdkInstance.rpc.profile.getProfileView(addr as `0x${string}`),
             ]);
 
             let xp = 0;
@@ -137,7 +141,7 @@ export function useFriendsLeaderboard(): {
               xp,
               stage: stageFromXp(xp),
               feedersCount: feeders.size,
-              isMe: addr === myAddress.toLowerCase(),
+              isMe: myAddress ? addr === myAddress.toLowerCase() : false,
             };
           }),
         );
@@ -157,7 +161,7 @@ export function useFriendsLeaderboard(): {
     return () => {
       cancelled = true;
     };
-  }, [ready, sdkRef, myAddress]);
+  }, [connectedSdk, myAddress]);
 
   return { rows, loading, error };
 }

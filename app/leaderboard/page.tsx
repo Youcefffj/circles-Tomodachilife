@@ -64,31 +64,33 @@ export default function LeaderboardPage() {
         </div>
       </div>
 
-      {/* ── Empty states ──────────────────────────────────────── */}
+      {/* Soft banners for unconnected / unregistered visitors —
+          they still see the full ranking below. */}
       {!wallet.address && (
-        <CartridgeMsg
-          icon="🛰"
-          title="Open inside Circles to see your leaderboard"
-        />
+        <div className="cartridge-sm flex items-center gap-3 px-4 py-3">
+          <span aria-hidden className="text-xl">🛰</span>
+          <p className="font-pixel text-[10px] uppercase tracking-wider text-muted-foreground">
+            You&apos;re browsing — open inside Circles to appear on the board.
+          </p>
+        </div>
       )}
 
       {wallet.address && sdk.kind === "ready" && !sdk.hasAvatar && (
-        <CartridgeMsg
-          icon="🐣"
-          title="Register a Circles avatar first"
-          subtitle="Sign up at metri.xyz, then come back — you'll show up on the board."
-        />
+        <div className="cartridge-sm flex items-center gap-3 px-4 py-3">
+          <span aria-hidden className="text-xl">🐣</span>
+          <p className="font-pixel text-[10px] uppercase tracking-wider text-muted-foreground">
+            Register a Circles avatar (metri.xyz) to compete.
+          </p>
+        </div>
       )}
 
-      {sdk.kind === "ready" && loading && rows.length === 0 && (
+      {loading && rows.length === 0 && (
         <CartridgeMsg
           icon="⏳"
           title="Computing the board…"
           subtitle="Pulling every Hatch player's XP from the indexer."
         />
       )}
-
-      {/* No "empty list" state needed — the user is always in the list. */}
 
       {error && (
         <div className="cartridge p-5">
