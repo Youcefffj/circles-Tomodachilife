@@ -13,8 +13,15 @@ type HistoryRow = {
   transactionHash?: string;
 };
 
-type AvatarLike = {
-  history: { getTransactions: (limit?: number) => Promise<{ results: HistoryRow[] }> };
+type SdkRead = {
+  rpc: {
+    transaction: {
+      getTransactionHistory: (
+        addr: `0x${string}`,
+        limit?: number,
+      ) => Promise<{ results: HistoryRow[] }>;
+    };
+  };
 };
 
 export type BlobProgress = {
@@ -43,8 +50,10 @@ const EMPTY: Omit<BlobProgress, "refresh"> = {
 };
 
 /**
- * Reads the user's Circles history and derives their blob's progress.
- * Incoming CRC = XP; unique senders = feeders; first incoming = hatch date.
+ * Reads the user's Circles history (via the raw RPC method to stay robust
+ * even when the Avatar wrapper is in a partial state) and derives the
+ * blob's progress: incoming CRC = XP, unique senders = feeders, first
+ * incoming = hatch date.
  */
 export function useBlobProgress(): BlobProgress {
   const sdkState = useSdk();
@@ -53,30 +62,27 @@ export function useBlobProgress(): BlobProgress {
 
   const refresh = useCallback(() => setTick((t) => t + 1), []);
 
-  // Flatten the variant into a stable dep set the linter is happy with.
-  const isReady = sdkState.kind === "ready";
+  const ready = sdkState.kind === "ready";
   const userAddress = sdkState.kind === "ready" ? sdkState.address : null;
-  const hasAvatar = sdkState.kind === "ready" ? sdkState.hasAvatar : false;
-  const avatar = useMemo(
-    () =>
-      sdkState.kind === "ready" && sdkState.hasAvatar
-        ? (sdkState.avatar as AvatarLike | null)
-        : null,
+  const sdkRef = useMemo(
+    () => (sdkState.kind === "ready" ? (sdkState.sdk as SdkRead) : null),
     [sdkState],
   );
 
   useEffect(() => {
-    if (!isReady || !hasAvatar || !avatar || !userAddress) {
+    if (!ready || !sdkRef || !userAddress) {
       setSnapshot(EMPTY);
       return;
     }
 
     let cancelled = false;
-
     const load = async () => {
       setSnapshot((prev) => ({ ...prev, loading: true, error: null }));
       try {
-        const page = await avatar.history.getTransactions(100);
+        const page = await sdkRef.rpc.transaction.getTransactionHistory(
+          userAddress,
+          100,
+        );
         const me = userAddress.toLowerCase();
         const incoming = (page.results ?? []).filter(
           (r) => r.to?.toLowerCase() === me,
@@ -113,6 +119,7 @@ export function useBlobProgress(): BlobProgress {
         });
       } catch (err) {
         if (cancelled) return;
+        console.error("[useBlobProgress] load failed:", err);
         setSnapshot((prev) => ({
           ...prev,
           loading: false,
@@ -125,7 +132,7 @@ export function useBlobProgress(): BlobProgress {
     return () => {
       cancelled = true;
     };
-  }, [isReady, hasAvatar, avatar, userAddress, tick]);
+  }, [ready, sdkRef, userAddress, tick]);
 
   return { ...snapshot, refresh };
 }

@@ -12,8 +12,15 @@ type HistoryRow = {
   transactionHash?: string;
 };
 
-type AvatarLike = {
-  history: { getTransactions: (limit?: number) => Promise<{ results: HistoryRow[] }> };
+type SdkRead = {
+  rpc: {
+    transaction: {
+      getTransactionHistory: (
+        addr: `0x${string}`,
+        limit?: number,
+      ) => Promise<{ results: HistoryRow[] }>;
+    };
+  };
 };
 
 export type FeedEvent = {
@@ -26,7 +33,11 @@ export type FeedEvent = {
 
 /**
  * Returns the most recent feed-style transfers (in + out) for the user's
- * avatar, ready for chronological display in /hall.
+ * wallet, ready for chronological display in /hall.
+ *
+ * Uses the raw RPC method directly (rather than the Avatar wrapper) so
+ * the call works even when the SDK avatar is in a partial state — same
+ * pattern as the leaderboard.
  */
 export function useFeedEvents(limit = 30): {
   events: FeedEvent[];
@@ -39,18 +50,14 @@ export function useFeedEvents(limit = 30): {
   const [error, setError] = useState<string | null>(null);
 
   const ready = sdkState.kind === "ready";
-  const hasAvatar = sdkState.kind === "ready" ? sdkState.hasAvatar : false;
   const userAddress = sdkState.kind === "ready" ? sdkState.address : null;
-  const avatar = useMemo(
-    () =>
-      sdkState.kind === "ready" && sdkState.hasAvatar
-        ? (sdkState.avatar as AvatarLike | null)
-        : null,
+  const sdkRef = useMemo(
+    () => (sdkState.kind === "ready" ? (sdkState.sdk as SdkRead) : null),
     [sdkState],
   );
 
   useEffect(() => {
-    if (!ready || !hasAvatar || !avatar || !userAddress) {
+    if (!ready || !sdkRef || !userAddress) {
       // eslint-disable-next-line react-hooks/set-state-in-effect
       setEvents([]);
       return;
@@ -61,7 +68,10 @@ export function useFeedEvents(limit = 30): {
       setLoading(true);
       setError(null);
       try {
-        const page = await avatar.history.getTransactions(limit);
+        const page = await sdkRef.rpc.transaction.getTransactionHistory(
+          userAddress,
+          limit,
+        );
         const me = userAddress.toLowerCase();
         const rows: FeedEvent[] = [];
         for (const r of page.results ?? []) {
@@ -86,12 +96,12 @@ export function useFeedEvents(limit = 30): {
             });
           }
         }
-
         rows.sort((a, b) => b.timestamp - a.timestamp);
         if (cancelled) return;
         setEvents(rows);
       } catch (err) {
         if (cancelled) return;
+        console.error("[useFeedEvents] load failed:", err);
         setError(err instanceof Error ? err.message : String(err));
       } finally {
         if (!cancelled) setLoading(false);
@@ -102,7 +112,7 @@ export function useFeedEvents(limit = 30): {
     return () => {
       cancelled = true;
     };
-  }, [ready, hasAvatar, avatar, userAddress, limit]);
+  }, [ready, sdkRef, userAddress, limit]);
 
   return { events, loading, error };
 }
