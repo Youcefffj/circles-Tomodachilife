@@ -19,18 +19,45 @@ export type ChatDebug = {
   lastPollCount: number;
   lastSendStatus: string;
   totalMessages: number;
+  hasToken: boolean;
 };
 
-const LS_KEY = "hatch_chat_session_marker";
+const LS_TOKEN_KEY = "hatch_chat_token";
+const LS_EXP_KEY = "hatch_chat_token_exp";
 const POLL_INTERVAL_MS = 3000;
+
+function readToken(): string | null {
+  if (typeof window === "undefined") return null;
+  const token = window.localStorage.getItem(LS_TOKEN_KEY);
+  const exp = Number(window.localStorage.getItem(LS_EXP_KEY) ?? 0);
+  if (!token || !exp) return null;
+  if (exp * 1000 < Date.now()) {
+    window.localStorage.removeItem(LS_TOKEN_KEY);
+    window.localStorage.removeItem(LS_EXP_KEY);
+    return null;
+  }
+  return token;
+}
+
+function writeToken(token: string, expiresAt: number) {
+  if (typeof window === "undefined") return;
+  window.localStorage.setItem(LS_TOKEN_KEY, token);
+  window.localStorage.setItem(LS_EXP_KEY, String(expiresAt));
+}
+
+function clearToken() {
+  if (typeof window === "undefined") return;
+  window.localStorage.removeItem(LS_TOKEN_KEY);
+  window.localStorage.removeItem(LS_EXP_KEY);
+}
 
 /**
  * Chat client hook — owns the sign-in flow + the polling loop.
  *
- * After a successful send, we trigger an *immediate* re-pull rather than
- * appending optimistically. This keeps the in-memory state in lock-step
- * with what the server actually persisted and avoids stale dedupe bugs
- * if the poll's `since` cursor lapses one message.
+ * Auth uses a Bearer token (sent in Authorization header) rather than a
+ * cookie, because Safari + iframe-aware Chrome strip cookies in cross-
+ * site iframe contexts (the Circles playground). Tokens are HMAC-signed
+ * server-side and live in localStorage; lifetime is 24h.
  */
 export function useChat() {
   const { address } = useWallet();
@@ -43,15 +70,17 @@ export function useChat() {
     lastPollCount: 0,
     lastSendStatus: "—",
     totalMessages: 0,
+    hasToken: false,
   });
   const sinceRef = useRef(0);
   const pullRef = useRef<() => Promise<void>>(async () => {});
 
-  // Restore "logged in" flag from localStorage on mount.
+  // Restore session token from localStorage on mount.
   useEffect(() => {
-    if (typeof window === "undefined") return;
-    if (window.localStorage.getItem(LS_KEY)) {
+    const token = readToken();
+    if (token) {
       setStatus("loggedIn");
+      setDebug((d) => ({ ...d, hasToken: true }));
     }
   }, []);
 
@@ -131,15 +160,20 @@ export function useChat() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ address, nonce, timestamp, signature }),
-        credentials: "include",
       });
-      const data = (await res.json()) as { ok: boolean; error?: string };
-      if (!data.ok) throw new Error(data.error ?? `login http ${res.status}`);
-
-      if (typeof window !== "undefined") {
-        window.localStorage.setItem(LS_KEY, "1");
+      const data = (await res.json()) as {
+        ok: boolean;
+        token?: string;
+        expiresAt?: number;
+        error?: string;
+      };
+      if (!data.ok || !data.token || !data.expiresAt) {
+        throw new Error(data.error ?? `login http ${res.status}`);
       }
+
+      writeToken(data.token, data.expiresAt);
       setStatus("loggedIn");
+      setDebug((d) => ({ ...d, hasToken: true }));
     } catch (err) {
       console.error("[useChat] login failed:", err);
       setStatus("error");
@@ -151,20 +185,30 @@ export function useChat() {
   const send = useCallback(async (text: string) => {
     const trimmed = text.trim();
     if (!trimmed) return false;
+
+    const token = readToken();
+    if (!token) {
+      setStatus("loggedOut");
+      setDebug((d) => ({ ...d, hasToken: false, lastSendStatus: "no token" }));
+      return false;
+    }
+
     setDebug((d) => ({ ...d, lastSendStatus: "sending…" }));
     try {
       const res = await fetch("/api/chat/post", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
         body: JSON.stringify({ text: trimmed }),
-        credentials: "include",
       });
 
       let data: { ok?: boolean; message?: ChatMessage; error?: string } = {};
       try {
         data = (await res.json()) as typeof data;
       } catch {
-        // body wasn't JSON — leave data empty
+        // body wasn't JSON
       }
 
       console.log("[useChat] POST /post", res.status, data);
@@ -177,10 +221,10 @@ export function useChat() {
       }));
 
       if (res.status === 401) {
-        if (typeof window !== "undefined") {
-          window.localStorage.removeItem(LS_KEY);
-        }
+        clearToken();
         setStatus("loggedOut");
+        setDebug((d) => ({ ...d, hasToken: false }));
+        setError("session expired — sign in again");
         return false;
       }
       if (!res.ok || !data.ok) {
@@ -188,8 +232,7 @@ export function useChat() {
         return false;
       }
 
-      // Force a fresh pull from the server — guaranteed to include
-      // whatever we just stored, no race with the interval timer.
+      // Force fresh pull — guaranteed to include what we just stored.
       sinceRef.current = 0;
       await pullRef.current();
       return true;

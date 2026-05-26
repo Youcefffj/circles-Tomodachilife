@@ -1,12 +1,11 @@
 import { NextResponse } from "next/server";
-import { cookies } from "next/headers";
 
 import {
   CHAT_LIST_KEY,
   CHAT_MAX_LENGTH,
   getRedis,
 } from "@/lib/server/redis";
-import { CHAT_COOKIE_NAME, verifySession } from "@/lib/server/session";
+import { bearerFrom, verifyToken } from "@/lib/server/session";
 
 export const runtime = "nodejs";
 
@@ -27,7 +26,10 @@ export async function POST(req: Request) {
     );
   }
 
-  const session = verifySession((await cookies()).get(CHAT_COOKIE_NAME)?.value);
+  // Bearer token in Authorization header (set by client after /login).
+  // Cookies would be blocked in the Circles playground iframe by Safari +
+  // tracking-protection-enabled Chrome — Bearer survives.
+  const session = verifyToken(bearerFrom(req));
   if (!session) {
     return NextResponse.json({ ok: false, error: "not signed in" }, { status: 401 });
   }

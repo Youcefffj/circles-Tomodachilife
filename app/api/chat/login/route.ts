@@ -1,29 +1,25 @@
 import { NextResponse } from "next/server";
-import { cookies } from "next/headers";
 import { isAddress, type Address, type Hex } from "viem";
 
 import { verifySafeSignature } from "@/lib/server/safe-verify";
-import { signSession, CHAT_COOKIE_NAME } from "@/lib/server/session";
+import { issueToken } from "@/lib/server/session";
 
 export const runtime = "nodejs"; // needs node:crypto for HMAC
 
 /**
- * Issue a chat session cookie.
+ * Issue a chat session Bearer token.
  *
- * The client signs   "Hatch chat sign-in\nAddress: 0x…\nNonce: <random>"
- * via miniapp-sdk.signMessage (defaults to erc1271 hashing — host wraps
- * with EIP-191 before EIP-712 signing through the user's Safe).
- *
- * We re-hash with EIP-191 server-side and call Safe.isValidSignature.
- * On success, a 24h HMAC-signed cookie is set; later /post requests
- * read the cookie to attribute messages.
- *
- * A small (200ms) artificial delay on failures throttles brute-force
- * sig guessing.
+ * Client signs   "Hatch chat sign-in\nAddress: 0x…\nNonce: <random>"
+ * through miniapp-sdk.signMessage (defaults to EIP-191 + Safe EIP-712).
+ * We rehash with EIP-191 and call Safe.isValidSignature on Gnosis.
+ * On success, return an HMAC-signed token in the body — client stores
+ * it in localStorage and sends it as `Authorization: Bearer <token>`
+ * on subsequent posts. Bearer (vs cookie) survives third-party-cookie
+ * blocking inside the Circles playground iframe.
  */
 
 const SLOW_FAIL_MS = 220;
-const MAX_NONCE_AGE_MS = 5 * 60 * 1000; // 5 minutes — replay window
+const MAX_NONCE_AGE_MS = 5 * 60 * 1000;
 
 export async function POST(req: Request) {
   let body: { address?: string; nonce?: string; signature?: string; timestamp?: number };
@@ -48,7 +44,6 @@ export async function POST(req: Request) {
     return badRequest("missing or malformed fields");
   }
 
-  // Reject stale signatures (replay protection).
   const now = Date.now();
   if (Math.abs(now - timestamp) > MAX_NONCE_AGE_MS) {
     return badRequest("signature too old");
@@ -66,18 +61,13 @@ export async function POST(req: Request) {
     return NextResponse.json({ ok: false, error: "invalid signature" }, { status: 401 });
   }
 
-  const { cookie } = signSession(address);
-  const store = await cookies();
-  store.set({
-    name: CHAT_COOKIE_NAME,
-    value: cookie.value,
-    maxAge: cookie.maxAge,
-    httpOnly: true,
-    sameSite: "lax",
-    secure: process.env.NODE_ENV === "production",
-    path: "/",
+  const { token, expiresAt } = issueToken(address);
+  return NextResponse.json({
+    ok: true,
+    address: address.toLowerCase(),
+    token,
+    expiresAt,
   });
-  return NextResponse.json({ ok: true, address: address.toLowerCase() });
 }
 
 export function chatLoginMessage(

@@ -1,33 +1,39 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
 
 /**
- * Stateless HMAC-signed session cookie for the chat. Stores the user's
- * Circles address + expiry. The signature is required so a forged cookie
- * can't impersonate someone else's wallet.
+ * Stateless HMAC-signed session token. Stores the user's Circles
+ * address + expiry. Used as a Bearer token in the Authorization header
+ * (not a cookie) so it survives third-party-cookie blocking inside the
+ * Circles playground iframe — works identically across Safari iOS,
+ * Chrome, Firefox, etc.
  *
- * Cookie format:   <base64url(payload)>.<base64url(hmac)>
- *   payload = JSON { address, exp }     (exp = unix seconds)
+ * Token format:   <base64url(payload)>.<base64url(hmac)>
+ *   payload = JSON { address, exp }   (exp = unix seconds)
  *
- * NB: an HMAC-signed cookie is fine here because the worst case of a
- * leaked cookie is "someone posts chat messages as me until exp". No
- * funds, no on-chain authority is bound to it.
+ * Signing the payload (not just storing it) is what prevents a forged
+ * token from impersonating someone else's wallet.
  */
 
-const COOKIE_NAME = "hatch_chat_session";
-const COOKIE_LIFETIME_S = 60 * 60 * 24; // 24h
+const TOKEN_LIFETIME_S = 60 * 60 * 24; // 24h
 
 type Payload = { address: string; exp: number };
 
 function secret(): Buffer {
   const s = process.env.HATCH_SESSION_SECRET;
   if (!s || s.length < 32) {
-    throw new Error("HATCH_SESSION_SECRET env var missing or too short (need 32+ chars).");
+    throw new Error(
+      "HATCH_SESSION_SECRET env var missing or too short (need 32+ chars).",
+    );
   }
   return Buffer.from(s, "utf8");
 }
 
 function b64url(buf: Buffer): string {
-  return buf.toString("base64").replace(/=+$/g, "").replace(/\+/g, "-").replace(/\//g, "_");
+  return buf
+    .toString("base64")
+    .replace(/=+$/g, "")
+    .replace(/\+/g, "-")
+    .replace(/\//g, "_");
 }
 
 function b64urlDecode(s: string): Buffer {
@@ -35,32 +41,20 @@ function b64urlDecode(s: string): Buffer {
   return Buffer.from(s.replace(/-/g, "+").replace(/_/g, "/") + pad, "base64");
 }
 
-export function signSession(address: string): {
-  cookie: { name: string; value: string; maxAge: number };
-  payload: Payload;
-} {
-  const payload: Payload = {
-    address: address.toLowerCase(),
-    exp: Math.floor(Date.now() / 1000) + COOKIE_LIFETIME_S,
-  };
+export function issueToken(address: string): { token: string; expiresAt: number } {
+  const exp = Math.floor(Date.now() / 1000) + TOKEN_LIFETIME_S;
+  const payload: Payload = { address: address.toLowerCase(), exp };
   const body = b64url(Buffer.from(JSON.stringify(payload)));
   const mac = b64url(createHmac("sha256", secret()).update(body).digest());
-  return {
-    cookie: {
-      name: COOKIE_NAME,
-      value: `${body}.${mac}`,
-      maxAge: COOKIE_LIFETIME_S,
-    },
-    payload,
-  };
+  return { token: `${body}.${mac}`, expiresAt: exp };
 }
 
-export function verifySession(cookieValue: string | undefined): Payload | null {
-  if (!cookieValue) return null;
-  const dot = cookieValue.lastIndexOf(".");
+export function verifyToken(token: string | undefined): Payload | null {
+  if (!token) return null;
+  const dot = token.lastIndexOf(".");
   if (dot <= 0) return null;
-  const body = cookieValue.slice(0, dot);
-  const mac = cookieValue.slice(dot + 1);
+  const body = token.slice(0, dot);
+  const mac = token.slice(dot + 1);
 
   let expected: Buffer;
   try {
@@ -83,4 +77,11 @@ export function verifySession(cookieValue: string | undefined): Payload | null {
   return payload;
 }
 
-export const CHAT_COOKIE_NAME = COOKIE_NAME;
+/** Extract a Bearer token from the Authorization header. */
+export function bearerFrom(req: Request): string | undefined {
+  const auth = req.headers.get("authorization") ?? req.headers.get("Authorization");
+  if (!auth) return undefined;
+  const [scheme, value] = auth.split(" ", 2);
+  if (scheme?.toLowerCase() !== "bearer" || !value) return undefined;
+  return value.trim();
+}
