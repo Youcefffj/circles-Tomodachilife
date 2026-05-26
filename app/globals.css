@@ -470,6 +470,44 @@
 
 .pixelated       { image-rendering: pixelated; image-rendering: crisp-edges; }
 
+/* ── Accessibility: respect the user's motion preference ─────────
+   When the OS-level setting is "reduced", we kill the busy idle anims
+   (blob bobble, particles, caustics, flames, leaves…) but keep one-shot
+   feedback anims (squish on feed) since they convey state. */
+@media (prefers-reduced-motion: reduce) {
+  .anim-egg,
+  .anim-baby,
+  .anim-teen,
+  .anim-adult,
+  .anim-blink,
+  .anim-halo,
+  .anim-caustics-a,
+  .anim-caustics-b,
+  .anim-shimmer,
+  .anim-led,
+  .anim-ember-flicker,
+  .anim-flame,
+  .anim-smoke,
+  .anim-hot-floor,
+  .anim-scene-flicker,
+  .anim-kelp,
+  .anim-floor-caustic,
+  .anim-sunray,
+  .anim-grass,
+  [class*="bubble-rise"],
+  [style*="bubble-rise"],
+  [style*="ember-rise"],
+  [style*="leaf-fall"] {
+    animation: none !important;
+  }
+  /* Disable the smooth bg-color transitions too — they imply motion. */
+  body,
+  .cartridge,
+  .cartridge-sm {
+    transition: none !important;
+  }
+}
+
 /* Smooth species swap on the elements that paint big surfaces */
 body, .cartridge, .cartridge-sm {
   transition: background-color 600ms ease-out, border-color 600ms ease-out;

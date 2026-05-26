@@ -3,6 +3,7 @@ import { Geist, Geist_Mono, Press_Start_2P } from "next/font/google";
 import "./globals.css";
 
 import { AppShell } from "@/components/layout/AppShell";
+import { SdkProvider } from "@/components/wallet/SdkProvider";
 import { WalletProvider } from "@/components/wallet/WalletProvider";
 
 const geistSans = Geist({
@@ -40,7 +41,9 @@ export default function RootLayout({
     >
       <body className="min-h-full">
         <WalletProvider>
-          <AppShell>{children}</AppShell>
+          <SdkProvider>
+            <AppShell>{children}</AppShell>
+          </SdkProvider>
         </WalletProvider>
       </body>
     </html>

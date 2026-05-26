@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import Image from "next/image";
 
 import { cn } from "@/lib/utils";
@@ -33,17 +33,7 @@ export function Blob({
   squish?: boolean;
   size?: number;
 }) {
-  const [imgFailed, setImgFailed] = useState(false);
-  const [closedAvailable, setClosedAvailable] = useState(true);
   const stageMeta = STAGE_META[stage];
-  const speciesMeta = SPECIES[species];
-
-  // Reset image-load state when the user switches stage/species.
-  // Otherwise a previous 404 would suppress the blink layer forever.
-  useEffect(() => {
-    setImgFailed(false);
-    setClosedAvailable(true);
-  }, [species, stage]);
 
   return (
     <div
@@ -67,7 +57,9 @@ export function Blob({
         }}
       />
 
-      {/* The sprite — or its placeholder */}
+      {/* The sprite — or its placeholder.
+          Keyed by species+stage so image-load state resets on switch
+          (React-19 idiomatic; no useEffect needed). */}
       <div
         className={cn(
           "relative flex items-end justify-center",
@@ -76,37 +68,58 @@ export function Blob({
         )}
         style={{ width: size * 0.8, height: size * 0.8 }}
       >
-        {imgFailed ? (
-          <PlaceholderBlob species={species} stage={stage} size={size * 0.8} />
-        ) : (
-          <div className="relative" style={{ width: size * 0.8, height: size * 0.8 }}>
-            {/* Eyes open — always rendered */}
-            <Image
-              src={spritePath(species, stage)}
-              alt={`${speciesMeta.label} ${stageMeta.label}`}
-              width={size * 0.8}
-              height={size * 0.8}
-              className="pixelated select-none"
-              onError={() => setImgFailed(true)}
-              unoptimized
-              priority
-            />
-            {/* Eyes closed — overlaid, opacity animated by the blink keyframe.
-                If the closed variant 404s, we hide the layer permanently. */}
-            {closedAvailable && (
-              <Image
-                src={spritePathClosed(species, stage)}
-                alt=""
-                width={size * 0.8}
-                height={size * 0.8}
-                className="pixelated anim-blink pointer-events-none absolute inset-0 select-none"
-                onError={() => setClosedAvailable(false)}
-                unoptimized
-              />
-            )}
-          </div>
-        )}
+        <SpriteLayer
+          key={`${species}-${stage}`}
+          species={species}
+          stage={stage}
+          size={size * 0.8}
+        />
       </div>
+    </div>
+  );
+}
+
+function SpriteLayer({
+  species,
+  stage,
+  size,
+}: {
+  species: Species;
+  stage: Stage;
+  size: number;
+}) {
+  const [imgFailed, setImgFailed] = useState(false);
+  const [closedAvailable, setClosedAvailable] = useState(true);
+  const stageMeta = STAGE_META[stage];
+  const speciesMeta = SPECIES[species];
+
+  if (imgFailed) {
+    return <PlaceholderBlob species={species} stage={stage} size={size} />;
+  }
+
+  return (
+    <div className="relative" style={{ width: size, height: size }}>
+      <Image
+        src={spritePath(species, stage)}
+        alt={`${speciesMeta.label} ${stageMeta.label}`}
+        width={size}
+        height={size}
+        className="pixelated select-none"
+        onError={() => setImgFailed(true)}
+        unoptimized
+        priority
+      />
+      {closedAvailable && (
+        <Image
+          src={spritePathClosed(species, stage)}
+          alt=""
+          width={size}
+          height={size}
+          className="pixelated anim-blink pointer-events-none absolute inset-0 select-none"
+          onError={() => setClosedAvailable(false)}
+          unoptimized
+        />
+      )}
     </div>
   );
 }
