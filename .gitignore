@@ -54,6 +54,10 @@ Thumbs.db
 ehthumbs.db
 Desktop.ini
 
+# WSL / Windows alternate-data-stream metadata
+*Zone.Identifier
+*.Identifier
+
 # Misc
 *.pem
 .cache/

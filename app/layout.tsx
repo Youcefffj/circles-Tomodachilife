@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
+import { Geist, Geist_Mono, Press_Start_2P } from "next/font/google";
 import "./globals.css";
 
 import { AppShell } from "@/components/layout/AppShell";
@@ -15,9 +15,17 @@ const geistMono = Geist_Mono({
   subsets: ["latin"],
 });
 
+const pressStart = Press_Start_2P({
+  variable: "--font-pixel",
+  weight: "400",
+  subsets: ["latin"],
+  display: "swap",
+});
+
 export const metadata: Metadata = {
-  title: "Miniapp Boilerplate",
-  description: "Next.js + shadcn starter for Circles miniapps",
+  title: "Hatch — money grows little creatures",
+  description:
+    "A Circles miniapp where everyday CRC activity hatches and raises tiny pixel creatures.",
 };
 
 export default function RootLayout({
@@ -28,7 +36,7 @@ export default function RootLayout({
   return (
     <html
       lang="en"
-      className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
+      className={`${geistSans.variable} ${geistMono.variable} ${pressStart.variable} h-full antialiased`}
     >
       <body className="min-h-full">
         <WalletProvider>

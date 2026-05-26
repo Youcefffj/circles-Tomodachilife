@@ -8,6 +8,7 @@
   --font-sans: var(--font-sans);
   --font-mono: var(--font-geist-mono);
   --font-heading: var(--font-sans);
+  --font-pixel: var(--font-pixel);
   --color-sidebar-ring: var(--sidebar-ring);
   --color-sidebar-border: var(--sidebar-border);
   --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
@@ -37,6 +38,11 @@
   --color-popover: var(--popover);
   --color-card-foreground: var(--card-foreground);
   --color-card: var(--card);
+  --color-species-accent: var(--species-accent);
+  --color-species-accent-soft: var(--species-accent-soft);
+  --color-ink: var(--ink);
+  --color-gold: var(--gold);
+  --color-cream: var(--cream);
   --radius-sm: calc(var(--radius) * 0.6);
   --radius-md: calc(var(--radius) * 0.8);
   --radius-lg: var(--radius);
@@ -46,49 +52,425 @@
   --radius-4xl: calc(var(--radius) * 2.6);
 }
 
+/* ─────────────────────────────────────────────────────────────
+   DA v4 · "World per species"
+   The whole UI breathes with the active species. Two driver vars:
+
+     --world-hue:  tints every dark surface (page, sidebar, cards…)
+     --bright-hue: tints every accent (primary, XP, LEDs, glows…)
+
+   Change them and the whole world flips. The default block is
+   AQUA. Each [data-species="X"] block redefines just the drivers,
+   and every derived variable recomputes on the fly.
+   ───────────────────────────────────────────────────────────── */
+
 :root {
-  --background: oklch(1 0 0);
-  --foreground: oklch(0.145 0 0);
-  --card: oklch(1 0 0);
-  --card-foreground: oklch(0.145 0 0);
-  --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.145 0 0);
-  --primary: oklch(0.205 0 0);
-  --primary-foreground: oklch(0.985 0 0);
-  --secondary: oklch(0.97 0 0);
-  --secondary-foreground: oklch(0.205 0 0);
-  --muted: oklch(0.97 0 0);
-  --muted-foreground: oklch(0.556 0 0);
-  --accent: oklch(0.97 0 0);
-  --accent-foreground: oklch(0.205 0 0);
-  --destructive: oklch(0.577 0.245 27.325);
-  --border: oklch(0.922 0 0);
-  --input: oklch(0.922 0 0);
-  --ring: oklch(0.708 0 0);
-  --chart-1: oklch(0.87 0 0);
-  --chart-2: oklch(0.556 0 0);
-  --chart-3: oklch(0.439 0 0);
-  --chart-4: oklch(0.371 0 0);
-  --chart-5: oklch(0.269 0 0);
-  --radius: 0.625rem;
-  --sidebar: oklch(0.985 0 0);
-  --sidebar-foreground: oklch(0.145 0 0);
-  --sidebar-primary: oklch(0.205 0 0);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.97 0 0);
-  --sidebar-accent-foreground: oklch(0.205 0 0);
-  --sidebar-border: oklch(0.922 0 0);
-  --sidebar-ring: oklch(0.708 0 0);
+  /* ── Drivers (Aqua default) ── */
+  --world-hue: 245;
+  --bright-hue: 220;
+  --tank-hue: 220;
+  --ambient-warm: oklch(0.35 0.1 60 / 0.18); /* fixed gold counter-glow */
+  --ambient-top-alpha: 0.55;                  /* species can crank this */
+  --ambient-top-l: 0.32;                      /* and the lightness */
+  --ambient-top-c: 0.13;                      /* and the chroma */
+  --starfield-alpha: 0.03;
+  --starfield-chroma: 0;
+
+  /* ── Derived dark surfaces ── */
+  --background: oklch(0.165 0.045 var(--world-hue));
+  --foreground: oklch(0.93 0.025 75);
+  --cream: oklch(0.93 0.025 75);
+
+  --card: oklch(0.215 0.055 var(--world-hue));
+  --card-foreground: oklch(0.93 0.025 75);
+  --popover: oklch(0.215 0.055 var(--world-hue));
+  --popover-foreground: oklch(0.93 0.025 75);
+
+  --secondary: oklch(0.27 0.06 var(--world-hue));
+  --secondary-foreground: oklch(0.93 0.025 75);
+
+  --muted: oklch(0.24 0.05 var(--world-hue));
+  --muted-foreground: oklch(0.68 0.04 var(--bright-hue));
+
+  --accent: oklch(0.32 0.08 calc(var(--world-hue) - 10));
+  --accent-foreground: oklch(0.93 0.025 75);
+
+  --border: oklch(0.34 0.07 var(--world-hue));
+  --input: oklch(0.34 0.07 var(--world-hue));
+  --ring: oklch(0.62 0.17 var(--bright-hue));
+
+  --destructive: oklch(0.65 0.22 25);
+
+  --ink: oklch(0.08 0.035 var(--world-hue));
+  --gold: oklch(0.82 0.14 78);
+
+  /* ── Bright accent (species-themed) ── */
+  --species-accent: oklch(0.62 0.17 var(--bright-hue));
+  --species-accent-soft: oklch(0.84 0.08 var(--bright-hue));
+  --species-accent-dim: oklch(0.42 0.13 calc(var(--bright-hue) + 15));
+
+  /* ── Tank gradient ── */
+  --tank-top: oklch(0.58 0.16 var(--tank-hue));
+  --tank-mid: oklch(0.42 0.13 calc(var(--tank-hue) + 15));
+  --tank-deep: oklch(0.12 0.06 calc(var(--tank-hue) + 30));
+
+  /* ── Primary uses the species accent so every primary surface
+        and active state takes the species tint automatically. ── */
+  --primary: oklch(0.62 0.17 var(--bright-hue));
+  --primary-foreground: oklch(0.99 0.01 80);
+
+  --chart-1: oklch(0.62 0.16 220);
+  --chart-2: oklch(0.65 0.18 40);
+  --chart-3: oklch(0.6 0.16 145);
+  --chart-4: oklch(0.78 0.16 95);
+  --chart-5: oklch(0.65 0.2 295);
+
+  --radius: 1rem;
+
+  /* ── Sidebar (also tinted by world-hue) ── */
+  --sidebar: oklch(0.13 0.04 var(--world-hue));
+  --sidebar-foreground: oklch(0.88 0.04 75);
+  --sidebar-primary: var(--species-accent);
+  --sidebar-primary-foreground: oklch(0.98 0.01 80);
+  --sidebar-accent: oklch(0.22 0.055 var(--world-hue));
+  --sidebar-accent-foreground: oklch(0.96 0.025 75);
+  --sidebar-border: oklch(0.27 0.06 var(--world-hue));
+  --sidebar-ring: var(--species-accent);
+
+  /* Aliases used by older components / direct refs */
+  --aqua: var(--species-accent);
+  --aqua-soft: var(--species-accent-soft);
+  --aqua-mid: var(--tank-mid);
+  --aqua-deep: var(--tank-deep);
+}
+
+/* ── Fire ── */
+[data-species="fire"] {
+  --world-hue: 28;
+  --bright-hue: 38;
+  --tank-hue: 25;
+  --ambient-warm: oklch(0.42 0.15 15 / 0.42);     /* deeper red counter-glow */
+  --ambient-top-alpha: 0.78;                       /* much hotter top glow */
+  --ambient-top-l: 0.45;
+  --ambient-top-c: 0.18;
+  --starfield-alpha: 0.05;
+  --starfield-chroma: 0.08;                        /* warm-tinted "embers" instead of pure white dots */
+}
+
+/* ── Plante (Plant) ── */
+[data-species="plante"] {
+  --world-hue: 150;
+  --bright-hue: 145;
+  --tank-hue: 145;
+  --ambient-warm: oklch(0.45 0.13 95 / 0.32);    /* warm sunlit-canopy counter-glow */
+  --ambient-top-alpha: 0.62;
+  --ambient-top-l: 0.42;
+  --ambient-top-c: 0.16;
+  --starfield-alpha: 0.04;
+  --starfield-chroma: 0.05;                       /* faint chlorophyll-tinted dots */
+}
+
+/* ── Reserved for future species (palettes ready, not yet selectable) ── */
+[data-species="spark"]   {
+  --world-hue: 95;
+  --bright-hue: 95;
+  --tank-hue: 90;
+}
+[data-species="lunar"]   {
+  --world-hue: 285;
+  --bright-hue: 295;
+  --tank-hue: 280;
+}
+[data-species="stone"]   {
+  --world-hue: 60;
+  --bright-hue: 55;
+  --tank-hue: 50;
 }
 
 @layer base {
   * {
     @apply border-border outline-ring/50;
   }
-  body {
-    @apply bg-background text-foreground;
-  }
   html {
     @apply font-sans;
   }
+  body {
+    @apply bg-background text-foreground;
+    /* Species-tinted top glow + warm counter-glow + vignette + starfield.
+       Every gradient stop reads from CSS vars so the whole atmosphere
+       shifts in one cascade when [data-species] changes. */
+    background-image:
+      radial-gradient(70% 50% at 15% 0%,
+        oklch(var(--ambient-top-l) var(--ambient-top-c) var(--bright-hue) / var(--ambient-top-alpha)),
+        transparent 60%),
+      radial-gradient(60% 50% at 100% 100%, var(--ambient-warm), transparent 65%),
+      radial-gradient(140% 80% at 50% 50%, transparent 50%, oklch(0 0 0 / 0.35) 100%),
+      radial-gradient(circle at 1px 1px,
+        oklch(0.92 var(--starfield-chroma) var(--bright-hue) / var(--starfield-alpha)) 1px,
+        transparent 0);
+    background-size: auto, auto, auto, 24px 24px;
+    background-attachment: fixed;
+    transition: background-color 600ms ease-out;
+  }
+  :root {
+    image-rendering: pixelated;
+  }
+  .font-pixel {
+    font-family: var(--font-pixel), ui-monospace, monospace;
+    letter-spacing: 0.02em;
+  }
+
+  ::selection {
+    background: oklch(0.62 0.17 var(--bright-hue) / 0.45);
+    color: var(--cream);
+  }
+}
+
+/* ── Surfaces ───────────────────────────────────────────────── */
+
+.cartridge {
+  border: 2px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--card);
+  box-shadow:
+    0 4px 0 0 var(--ink),
+    inset 0 1px 0 0 oklch(1 0 0 / 0.06),
+    0 10px 20px -10px oklch(0 0 0 / 0.5);
+}
+.cartridge-sm {
+  border: 2px solid var(--border);
+  border-radius: calc(var(--radius) * 0.55);
+  background: var(--card);
+  box-shadow:
+    0 3px 0 0 var(--ink),
+    inset 0 1px 0 0 oklch(1 0 0 / 0.05);
+}
+
+.btn-pixel {
+  position: relative;
+  border: 2px solid var(--ink);
+  border-radius: 0.6rem;
+  box-shadow:
+    0 4px 0 0 var(--ink),
+    inset 0 1px 0 0 oklch(1 0 0 / 0.2);
+  transition: transform 80ms ease-out, box-shadow 80ms ease-out;
+}
+.btn-pixel:active {
+  transform: translateY(3px);
+  box-shadow:
+    0 1px 0 0 var(--ink),
+    inset 0 1px 0 0 oklch(1 0 0 / 0.12);
+}
+
+.scanlines::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background-image: repeating-linear-gradient(
+    to bottom,
+    oklch(1 0 0 / 0.04) 0,
+    oklch(1 0 0 / 0.04) 1px,
+    transparent 1px,
+    transparent 3px
+  );
+  mix-blend-mode: overlay;
+  opacity: 0.55;
+  border-radius: inherit;
+}
+
+/* ── Keyframes ──────────────────────────────────────────────── */
+
+@keyframes egg-wobble {
+  0%, 92%, 100% { transform: translateY(0) rotate(0deg); }
+  20%           { transform: translateY(-2px) rotate(-1.5deg); }
+  50%           { transform: translateY(-1px) rotate(1.5deg); }
+  80%           { transform: translateY(-2px) rotate(-1deg); }
+  94%, 98%      { transform: translateY(-1px) rotate(-3deg); }
+  96%           { transform: translateY(-1px) rotate(3deg); }
+}
+
+@keyframes baby-bobble {
+  0%, 100% { transform: translateY(0) scaleY(1) scaleX(1); }
+  40%, 60% { transform: translateY(-7px) scaleY(1.04) scaleX(0.96); }
+  85%      { transform: translateY(0) scaleY(0.94) scaleX(1.06); }
+}
+
+@keyframes teen-bobble {
+  0%, 100% { transform: translateY(0) rotate(0); }
+  25%      { transform: translateY(-5px) rotate(-2deg); }
+  50%      { transform: translateY(0) rotate(0); }
+  75%      { transform: translateY(-5px) rotate(2deg); }
+}
+
+@keyframes adult-breathe {
+  0%, 100% { transform: scaleY(1) scaleX(1); }
+  50%      { transform: scaleY(1.03) scaleX(0.975); }
+}
+
+@keyframes feed-squish {
+  0%   { transform: scale(1, 1); }
+  18%  { transform: scale(1.18, 0.82); }
+  40%  { transform: scale(0.92, 1.1); }
+  65%  { transform: scale(1.05, 0.95); }
+  100% { transform: scale(1, 1); }
+}
+
+@keyframes halo-pulse {
+  0%, 100% { opacity: 0.5; transform: translateX(-50%) scale(1); }
+  50%      { opacity: 0.9; transform: translateX(-50%) scale(1.1); }
+}
+
+/* Bubble (aqua) — rises slowly, large and clear */
+@keyframes bubble-rise {
+  0%   { transform: translate(0, 0) scale(0.55); opacity: 0; }
+  12%  { opacity: 0.75; }
+  85%  { opacity: 0.75; transform: translate(var(--drift, 0px), -200px) scale(1); }
+  100% { transform: translate(var(--drift, 0px), -230px) scale(1.15); opacity: 0; }
+}
+
+/* Ember (fire) — small, fast, cools as it rises (shrinks + fades) */
+@keyframes ember-rise {
+  0%   { transform: translate(0, 0) scale(1); opacity: 0; filter: blur(0.5px) brightness(1.2); }
+  10%  { opacity: 1; }
+  60%  { opacity: 0.9; transform: translate(var(--drift, 0px), -130px) scale(0.65); filter: blur(0.5px) brightness(0.95); }
+  100% { transform: translate(calc(var(--drift, 0px) * 1.3), -210px) scale(0.25); opacity: 0; filter: blur(1.2px) brightness(0.7); }
+}
+
+@keyframes ember-flicker {
+  0%, 100% { box-shadow: 0 0 6px 1px oklch(0.82 0.18 50 / 0.6); }
+  50%      { box-shadow: 0 0 10px 2px oklch(0.85 0.2 40 / 0.8); }
+}
+
+@keyframes caustics {
+  0%, 100% { transform: translate(-10%, -8%) rotate(0deg); }
+  50%      { transform: translate(8%, 6%) rotate(8deg); }
+}
+@keyframes caustics-b {
+  0%, 100% { transform: translate(5%, 4%) rotate(0deg); }
+  50%      { transform: translate(-8%, -6%) rotate(-8deg); }
+}
+
+@keyframes shimmer {
+  0%, 100% { opacity: 0.35; transform: translateX(-10%); }
+  50%      { opacity: 0.6;  transform: translateX(10%); }
+}
+
+@keyframes sparkle {
+  0%, 100% { opacity: 0; transform: scale(0.5) rotate(0); }
+  50%      { opacity: 1; transform: scale(1) rotate(180deg); }
+}
+
+@keyframes blink {
+  0%,  78%, 100% { opacity: 0; }
+  80%, 86%       { opacity: 1; }
+  88%, 90%       { opacity: 0; }
+  92%, 95%       { opacity: 1; }
+  96%            { opacity: 0; }
+}
+
+@keyframes led-blink {
+  0%, 49%, 100% { opacity: 0.35; }
+  50%, 99%      { opacity: 1; }
+}
+
+/* Fire-specific scene layers ─────────────────────────────────── */
+
+/* Flame body lick — for the flame silhouettes at the tank floor */
+@keyframes flame-lick {
+  0%, 100% { transform: scaleY(1)    skewX(0deg) rotate(0deg); opacity: 0.85; }
+  20%      { transform: scaleY(1.15) skewX(-3deg) rotate(-1deg); opacity: 1; }
+  40%      { transform: scaleY(0.92) skewX(2deg)  rotate(1deg);  opacity: 0.7; }
+  60%      { transform: scaleY(1.08) skewX(-1deg) rotate(-0.5deg); opacity: 0.95; }
+  80%      { transform: scaleY(0.95) skewX(1.5deg) rotate(0.5deg); opacity: 0.8; }
+}
+
+/* Smoke wisp rising — translucent gray cloud */
+@keyframes smoke-rise {
+  0%   { transform: translateY(0) scale(0.5); opacity: 0; }
+  20%  { opacity: 0.45; }
+  80%  { opacity: 0.18; transform: translateY(-180px) scale(1.7); }
+  100% { transform: translateY(-220px) scale(2.1); opacity: 0; }
+}
+
+/* Hot floor pulse — radial glow at the bottom of the fire tank */
+@keyframes hot-floor {
+  0%, 100% { opacity: 0.7; transform: translateX(-50%) scaleY(1) scaleX(1); }
+  50%      { opacity: 1;   transform: translateX(-50%) scaleY(1.08) scaleX(1.05); }
+}
+
+/* Subtle scene flicker — overall tank brightness pulse */
+@keyframes scene-flicker {
+  0%, 100% { filter: brightness(1); }
+  3%       { filter: brightness(1.05); }
+  6%       { filter: brightness(0.98); }
+  9%       { filter: brightness(1.03); }
+  12%      { filter: brightness(1); }
+}
+
+/* Plante-specific scene layers ───────────────────────────────── */
+
+/* Leaf fall — feuilles qui dérivent vers le bas en tournoyant */
+@keyframes leaf-fall {
+  0%   { transform: translate(0, -40px) rotate(0deg);   opacity: 0; }
+  8%   { opacity: 0.95; }
+  50%  { transform: translate(calc(var(--drift, 30px) * 0.4), 100px) rotate(360deg); }
+  92%  { opacity: 0.85; }
+  100% { transform: translate(var(--drift, 30px), 240px) rotate(720deg); opacity: 0; }
+}
+
+/* Sun-ray gentle shimmer — different from water shimmer, less horizontal */
+@keyframes sunray-pulse {
+  0%, 100% { opacity: 0.25; }
+  50%      { opacity: 0.5; }
+}
+
+/* Grass tuft sway — more grounded than kelp */
+@keyframes grass-sway {
+  0%, 100% { transform: rotate(-2deg); }
+  50%      { transform: rotate(2deg); }
+}
+
+/* Aqua-specific scene layers ─────────────────────────────────── */
+
+/* Kelp sway — slim vertical silhouettes at the back of the aqua tank */
+@keyframes kelp-sway {
+  0%, 100% { transform: rotate(-4deg); }
+  50%      { transform: rotate(4deg); }
+}
+
+/* Caustic spot drifting on the tank floor */
+@keyframes floor-caustic {
+  0%, 100% { transform: translate(-30%, 0)   scale(1); opacity: 0.5; }
+  50%      { transform: translate(30%, -2px) scale(1.15); opacity: 0.85; }
+}
+
+/* ── Utility classes ────────────────────────────────────────── */
+
+.anim-egg        { animation: egg-wobble 3.2s ease-in-out infinite; transform-origin: bottom center; }
+.anim-baby       { animation: baby-bobble 1.25s ease-in-out infinite; transform-origin: bottom center; }
+.anim-teen       { animation: teen-bobble 2.4s ease-in-out infinite; transform-origin: bottom center; }
+.anim-adult      { animation: adult-breathe 3.6s ease-in-out infinite; transform-origin: bottom center; }
+.anim-squish     { animation: feed-squish 0.55s ease-out 1; transform-origin: bottom center; }
+.anim-halo       { animation: halo-pulse 2.4s ease-in-out infinite; }
+.anim-blink      { animation: blink 3.6s steps(1, end) infinite; }
+.anim-caustics-a { animation: caustics 14s ease-in-out infinite; }
+.anim-caustics-b { animation: caustics-b 18s ease-in-out infinite; }
+.anim-shimmer    { animation: shimmer 5s ease-in-out infinite; }
+.anim-led        { animation: led-blink 2.4s steps(1, end) infinite; }
+.anim-ember-flicker  { animation: ember-flicker 1.4s ease-in-out infinite; }
+.anim-flame          { animation: flame-lick 1.2s ease-in-out infinite; transform-origin: bottom center; }
+.anim-smoke          { animation: smoke-rise 7s ease-in infinite; }
+.anim-hot-floor      { animation: hot-floor 2.8s ease-in-out infinite; }
+.anim-scene-flicker  { animation: scene-flicker 5.5s ease-in-out infinite; }
+.anim-kelp           { animation: kelp-sway 4s ease-in-out infinite; transform-origin: bottom center; }
+.anim-floor-caustic  { animation: floor-caustic 9s ease-in-out infinite; }
+.anim-sunray         { animation: sunray-pulse 6s ease-in-out infinite; }
+.anim-grass          { animation: grass-sway 3.4s ease-in-out infinite; transform-origin: bottom center; }
+
+.pixelated       { image-rendering: pixelated; image-rendering: crisp-edges; }
+
+/* Smooth species swap on the elements that paint big surfaces */
+body, .cartridge, .cartridge-sm {
+  transition: background-color 600ms ease-out, border-color 600ms ease-out;
 }
