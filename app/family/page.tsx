@@ -6,10 +6,12 @@ import { Blob } from "@/components/hatch/Blob";
 import { useSdk } from "@/components/wallet/SdkProvider";
 import { useWallet } from "@/components/wallet/WalletProvider";
 import { useBlobProgress } from "@/lib/use-blob-progress";
+import { useEggState } from "@/lib/use-egg-state";
 import {
   SPECIES,
   STAGE_META,
   speciesFromAddress,
+  stageFromXp,
   type Species,
 } from "@/lib/hatch";
 import { cn, shortenAddress } from "@/lib/utils";
@@ -29,6 +31,7 @@ export default function FamilyPage() {
   const wallet = useWallet();
   const sdk = useSdk();
   const progress = useBlobProgress();
+  const egg = useEggState(wallet.address);
 
   const [trustList, setTrustList] = useState<TrustRow[] | null>(null);
 
@@ -51,96 +54,126 @@ export default function FamilyPage() {
     };
   }, [sdk]);
 
-  // Paint world to match the active species so /family stays cohesive
-  // even when the user navigates here directly.
-  const mySpecies: Species = wallet.address
+  // Active species follows the egg picker; falls back to address-derived
+  // before the user has made a choice.
+  const fallbackSpecies: Species = wallet.address
     ? speciesFromAddress(wallet.address)
     : "aqua";
+  const mySpecies: Species = egg.state.currentSpecies ?? fallbackSpecies;
 
   useEffect(() => {
     document.documentElement.dataset.species = mySpecies;
     document.cookie = `hatch_species=${mySpecies}; max-age=31536000; path=/; SameSite=Lax`;
   }, [mySpecies]);
 
-  const stageMeta = STAGE_META[progress.stage];
+  // Current blob's progress within its own life (resets on graduation).
+  const currentXp = Math.max(0, progress.xp - egg.state.xpCheckpoint);
+  const currentStage = stageFromXp(currentXp);
+  const stageMeta = STAGE_META[currentStage];
   const speciesMeta = SPECIES[mySpecies];
-  const isAdult = progress.stage === "adult";
+  const familyCount = egg.state.family.length;
 
   return (
     <div className="mx-auto flex max-w-3xl flex-col gap-6 pb-12">
-      {/* ── Title ─────────────────────────────────────────────── */}
+      {/* Title */}
       <div className="px-1">
         <p className="font-pixel text-[10px] uppercase tracking-[0.25em] text-[var(--species-accent)]">
-          Family Album
+          Family Album · {String(familyCount).padStart(2, "0")} grown
         </p>
         <h1 className="font-pixel mt-1 text-2xl text-foreground sm:text-3xl">
-          Your nest&apos;s grown creatures.
+          Your nest&apos;s lineage.
         </h1>
         <p className="mt-2 max-w-md text-sm text-muted-foreground">
-          Each blob you raise to Adult joins this album. Trusted friends sit
-          below — visit their nest from the home page.
+          Every blob you graduate joins this album. Pick a new egg from the
+          Nest page to start the next one.
         </p>
       </div>
 
-      {/* ── Your blob ─────────────────────────────────────────── */}
-      <section className="flex flex-col gap-3">
-        <p className="font-pixel px-1 text-[10px] uppercase tracking-wider text-muted-foreground">
-          Your blob
-        </p>
-        <div
-          className={cn(
-            "cartridge relative flex items-center gap-4 p-5",
-            isAdult && "ring-2 ring-[var(--species-accent)] ring-offset-2 ring-offset-background",
-          )}
-        >
-          {/* sprite */}
-          <div className="shrink-0">
-            <Blob species={mySpecies} stage={progress.stage} size={140} />
+      {/* ── Album of graduated blobs ───────────────────────────── */}
+      {familyCount > 0 && (
+        <section className="flex flex-col gap-3">
+          <p className="font-pixel px-1 text-[10px] uppercase tracking-wider text-muted-foreground">
+            Graduated
+          </p>
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+            {egg.state.family.map((s, i) => (
+              <GraduatedCard key={`${s}-${i}`} species={s} order={i + 1} />
+            ))}
           </div>
+        </section>
+      )}
 
-          {/* meta */}
-          <div className="flex min-w-0 flex-1 flex-col gap-2">
-            <div className="flex items-center gap-2">
-              <span aria-hidden className="text-base">{speciesMeta.icon}</span>
-              <span className="font-pixel text-sm uppercase tracking-wider text-foreground">
-                {speciesMeta.label}
-              </span>
-              <span className="font-pixel text-[10px] uppercase tracking-wider text-muted-foreground">
-                · {stageMeta.label}
-              </span>
+      {/* ── Currently growing ──────────────────────────────────── */}
+      {egg.state.currentSpecies && (
+        <section className="flex flex-col gap-3">
+          <p className="font-pixel px-1 text-[10px] uppercase tracking-wider text-muted-foreground">
+            Growing now
+          </p>
+          <div
+            className={cn(
+              "cartridge relative flex items-center gap-4 p-5",
+              currentStage === "adult" &&
+                "ring-2 ring-[var(--species-accent)] ring-offset-2 ring-offset-background",
+            )}
+          >
+            <div className="shrink-0">
+              <Blob species={mySpecies} stage={currentStage} size={140} />
             </div>
 
-            <p className="text-xs text-muted-foreground">
-              {speciesMeta.blurb}
+            <div className="flex min-w-0 flex-1 flex-col gap-2">
+              <div className="flex items-center gap-2">
+                <span aria-hidden className="text-base">{speciesMeta.icon}</span>
+                <span className="font-pixel text-sm uppercase tracking-wider text-foreground">
+                  {speciesMeta.label}
+                </span>
+                <span className="font-pixel text-[10px] uppercase tracking-wider text-muted-foreground">
+                  · {stageMeta.label}
+                </span>
+              </div>
+
+              <p className="text-xs text-muted-foreground">
+                {speciesMeta.blurb}
+              </p>
+
+              <div className="mt-1 grid grid-cols-2 gap-x-4 gap-y-1 text-xs">
+                <span className="text-muted-foreground">XP this life</span>
+                <span className="font-pixel text-foreground">
+                  {Math.floor(currentXp)} CRC
+                </span>
+                <span className="text-muted-foreground">Fed by</span>
+                <span className="font-pixel text-foreground">
+                  {progress.feedersCount} friend{progress.feedersCount === 1 ? "" : "s"}
+                </span>
+                {currentStage === "adult" && (
+                  <>
+                    <span className="text-muted-foreground">Status</span>
+                    <span className="font-pixel text-[var(--species-accent)]">
+                      ★ Ready to graduate
+                    </span>
+                  </>
+                )}
+              </div>
+            </div>
+          </div>
+        </section>
+      )}
+
+      {/* ── Empty state ────────────────────────────────────────── */}
+      {familyCount === 0 && !egg.state.currentSpecies && (
+        <div className="cartridge grid min-h-48 place-items-center p-8">
+          <div className="text-center">
+            <p aria-hidden className="text-3xl">🥚</p>
+            <p className="font-pixel mt-4 text-[10px] uppercase tracking-wider text-muted-foreground">
+              No blobs yet
             </p>
-
-            <div className="mt-1 grid grid-cols-2 gap-x-4 gap-y-1 text-xs">
-              <span className="text-muted-foreground">XP</span>
-              <span className="font-pixel text-foreground">
-                {Math.floor(progress.xp)} CRC
-              </span>
-              <span className="text-muted-foreground">Fed by</span>
-              <span className="font-pixel text-foreground">
-                {progress.feedersCount} friend{progress.feedersCount === 1 ? "" : "s"}
-              </span>
-              <span className="text-muted-foreground">Total feeds</span>
-              <span className="font-pixel text-foreground">
-                {progress.totalIncoming}
-              </span>
-              {isAdult && (
-                <>
-                  <span className="text-muted-foreground">Status</span>
-                  <span className="font-pixel text-[var(--species-accent)]">
-                    ★ Adult — joined the album
-                  </span>
-                </>
-              )}
-            </div>
+            <p className="mt-2 max-w-xs text-xs text-muted-foreground">
+              Go to the Nest page to pick your first egg.
+            </p>
           </div>
         </div>
-      </section>
+      )}
 
-      {/* ── Trust circle ──────────────────────────────────────── */}
+      {/* ── Trust circle ───────────────────────────────────────── */}
       <section className="flex flex-col gap-3">
         <p className="font-pixel px-1 text-[10px] uppercase tracking-wider text-muted-foreground">
           Your trust circle
@@ -185,6 +218,27 @@ export default function FamilyPage() {
   );
 }
 
+function GraduatedCard({ species, order }: { species: Species; order: number }) {
+  const meta = SPECIES[species];
+  return (
+    <div className="cartridge-sm relative flex flex-col items-center gap-2 p-4 text-center">
+      <span className="font-pixel absolute right-2 top-2 text-[9px] uppercase tracking-wider text-muted-foreground">
+        #{String(order).padStart(2, "0")}
+      </span>
+      <div className="my-1">
+        <Blob species={species} stage="adult" size={96} />
+      </div>
+      <span aria-hidden className="text-base">{meta.icon}</span>
+      <span className="font-pixel text-[11px] uppercase tracking-wider text-foreground">
+        {meta.label}
+      </span>
+      <span className="font-pixel text-[9px] uppercase tracking-wider text-[var(--species-accent)]">
+        ★ Adult
+      </span>
+    </div>
+  );
+}
+
 function FriendNestCard({ row }: { row: TrustRow }) {
   const species = speciesFromAddress(row.objectAvatar);
   const meta = SPECIES[species];
@@ -192,8 +246,6 @@ function FriendNestCard({ row }: { row: TrustRow }) {
   return (
     <div className="cartridge-sm relative flex flex-col items-center gap-2 p-4 text-center">
       <div className="my-1">
-        {/* Stage is unknown for other people without an extra RPC call —
-            we show them at "teen" as a neutral, recognisable form. */}
         <Blob species={species} stage="teen" size={96} />
       </div>
       <span className="font-pixel text-[11px] text-foreground">

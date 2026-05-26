@@ -6,7 +6,8 @@ import { useSdk } from "@/components/wallet/SdkProvider";
 import { useWallet } from "@/components/wallet/WalletProvider";
 import { useProfile } from "@/lib/use-profile";
 import { useBlobProgress } from "@/lib/use-blob-progress";
-import { SPECIES, speciesFromAddress } from "@/lib/hatch";
+import { useEggState } from "@/lib/use-egg-state";
+import { SPECIES, speciesFromAddress, stageFromXp } from "@/lib/hatch";
 import { shortenAddress } from "@/lib/utils";
 
 type ProfileViewRich = {
@@ -29,6 +30,7 @@ export default function ProfilePage() {
   const sdk = useSdk();
   const profile = useProfile();
   const progress = useBlobProgress();
+  const egg = useEggState(wallet.address);
 
   const [rich, setRich] = useState<ProfileViewRich | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -50,8 +52,13 @@ export default function ProfilePage() {
     };
   }, [sdk]);
 
-  const species = wallet.address ? speciesFromAddress(wallet.address) : "aqua";
+  // Use the egg-picker choice if made; address-derived otherwise.
+  const species =
+    egg.state.currentSpecies ??
+    (wallet.address ? speciesFromAddress(wallet.address) : "aqua");
   const meta = SPECIES[species];
+  const currentXp = Math.max(0, progress.xp - egg.state.xpCheckpoint);
+  const currentStage = stageFromXp(currentXp);
 
   return (
     <div className="mx-auto flex max-w-3xl flex-col gap-6 pb-12">
@@ -138,7 +145,7 @@ export default function ProfilePage() {
             <StatBlock label="Species" value={meta.label} icon={meta.icon} />
             <StatBlock
               label="Stage"
-              value={progress.stage.charAt(0).toUpperCase() + progress.stage.slice(1)}
+              value={currentStage.charAt(0).toUpperCase() + currentStage.slice(1)}
               icon="🐣"
             />
             <StatBlock

@@ -3,8 +3,10 @@
 import { useEffect, useState } from "react";
 
 import { Blob } from "@/components/hatch/Blob";
+import { EggSelectModal } from "@/components/hatch/EggSelectModal";
 import { FeedButton } from "@/components/hatch/FeedButton";
 import { FriendsDialog } from "@/components/hatch/FriendsDialog";
+import { PixelButton } from "@/components/hatch/PixelButton";
 import { Scene } from "@/components/hatch/Scene";
 import { SpeciesCycler } from "@/components/hatch/SpeciesCycler";
 import { StageCycler } from "@/components/hatch/StageCycler";
@@ -13,20 +15,29 @@ import { XPBar } from "@/components/hatch/XPBar";
 import { useWallet } from "@/components/wallet/WalletProvider";
 import { useSdk } from "@/components/wallet/SdkProvider";
 import { useBlobProgress } from "@/lib/use-blob-progress";
+import { useEggState } from "@/lib/use-egg-state";
 import { useProfile } from "@/lib/use-profile";
 import {
   SPECIES,
   STAGE_META,
   nameFromSeed,
   speciesFromAddress,
+  stageFromXp,
   xpInStage,
   type Species,
   type Stage,
 } from "@/lib/hatch";
 
+type TrustRow = { objectAvatar: string; relation: string };
+type AvatarLike = {
+  trust: { getAll: () => Promise<TrustRow[]> };
+  transfer: { advanced: (to: string, amount: bigint) => Promise<unknown> };
+};
+
+const EGG_PRICE_CRC = 2;
+
 export default function HatchHomePage() {
-  // Debug toggle: ?debug=1 in the URL. Reads window after mount so the
-  // route can still prerender statically (hydration takes over from there).
+  // ── Debug toggle (?debug=1) ─────────────────────────────────────
   const [isDebug, setIsDebug] = useState(false);
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -39,11 +50,13 @@ export default function HatchHomePage() {
   const sdk = useSdk();
   const progress = useBlobProgress();
   const profile = useProfile();
+  const egg = useEggState(wallet.address);
 
-  // Debug-mode demo state (only used when ?debug=1)
+  // ── Demo overrides ──────────────────────────────────────────────
   const [demoSpecies, setDemoSpecies] = useState<Species>("aqua");
   const [demoStage, setDemoStage] = useState<Stage>("teen");
 
+  // ── Squish on feed ──────────────────────────────────────────────
   const [squish, setSquish] = useState(false);
   const triggerSquish = () => {
     setSquish(false);
@@ -51,40 +64,108 @@ export default function HatchHomePage() {
     setTimeout(() => setSquish(false), 620);
   };
 
-  // ── Derive the active blob view ────────────────────────────────────
-  // Real data when we have a wallet, demo overrides when ?debug=1.
-  const species: Species = isDebug
-    ? demoSpecies
-    : wallet.address
+  // ── Derive the active blob view ─────────────────────────────────
+  // Current XP in this blob = total CRC received minus the checkpoint
+  // we locked at the previous graduation. New blobs restart at 0.
+  const currentXp = Math.max(0, progress.xp - egg.state.xpCheckpoint);
+  const currentStage: Stage = stageFromXp(currentXp);
+
+  // Species selection: stored choice > address fallback > demo override
+  const fallbackSpecies: Species = wallet.address
     ? speciesFromAddress(wallet.address)
     : "aqua";
+  const species: Species = isDebug
+    ? demoSpecies
+    : egg.state.currentSpecies ?? fallbackSpecies;
+  const stage: Stage = isDebug ? demoStage : currentStage;
+  const xp = isDebug ? xpForDemoStage(demoStage) : currentXp;
 
-  const stage: Stage = isDebug ? demoStage : progress.stage;
-  const xp = isDebug ? xpForDemoStage(demoStage) : progress.xp;
   const stageMeta = STAGE_META[stage];
   const within = xpInStage(xp, stage);
   const meta = SPECIES[species];
-  // Prefer the user's real Circles profile name; fall back to a deterministic
-  // cute name derived from the address if they haven't set one yet.
   const name =
     profile?.name?.trim() ||
     (wallet.address ? capitalize(nameFromSeed(wallet.address)) : "Bubbly");
 
-  // Paint the world to match the active species + persist the choice in a
-  // cookie so the inline bootstrap script can pre-apply it on next visit
-  // (no palette flash). Cascades through every species-themed CSS var.
+  // ── Egg modal control ──────────────────────────────────────────
+  const [eggModalOpen, setEggModalOpen] = useState(false);
+  const isFirstEgg = egg.loaded && egg.state.currentSpecies === null;
+
+  // Auto-open on first connect (no choice yet, but everything is loaded).
+  useEffect(() => {
+    if (
+      sdk.kind === "ready" &&
+      sdk.hasAvatar &&
+      egg.loaded &&
+      isFirstEgg &&
+      !isDebug
+    ) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setEggModalOpen(true);
+    }
+  }, [sdk, egg.loaded, isFirstEgg, isDebug]);
+
+  // ── World repaint ───────────────────────────────────────────────
   useEffect(() => {
     document.documentElement.dataset.species = species;
     document.cookie = `hatch_species=${species}; max-age=31536000; path=/; SameSite=Lax`;
   }, [species]);
 
-  const onFeedSuccess = () => {
+  const onFeedSuccess = () => progress.refresh();
+
+  // ── Egg picker handlers ─────────────────────────────────────────
+  const handleFreePick = (s: Species) => {
+    egg.chooseSpecies(s);
+    setEggModalOpen(false);
+  };
+
+  const handleRandom = () => {
+    const picked = egg.pickRandom();
+    setEggModalOpen(false);
+    return picked;
+  };
+
+  /**
+   * Paid choice (2 CRC). Sends to a random member of the user's trust
+   * circle — keeps the CRC inside the network. If no trustees, we error
+   * out so the user falls back to Random or trusts someone first.
+   */
+  const handlePaidPick = async (s: Species) => {
+    if (sdk.kind !== "ready" || !sdk.avatar) {
+      throw new Error("SDK not ready");
+    }
+    const avatar = sdk.avatar as AvatarLike;
+    const trusts = await avatar.trust.getAll();
+    const eligible = trusts.filter(
+      (r) => r.relation === "trusts" || r.relation === "mutuallyTrusts",
+    );
+    if (eligible.length === 0) {
+      throw new Error("No trusted friend to receive the 2 CRC — pick Random or trust someone first.");
+    }
+    const target = eligible[Math.floor(Math.random() * eligible.length)].objectAvatar;
+    await avatar.transfer.advanced(target, BigInt(EGG_PRICE_CRC) * BigInt(1e18));
+    egg.chooseSpecies(s);
+    setEggModalOpen(false);
     progress.refresh();
   };
 
+  // Has the current blob graduated? Stage adult + we still have a current species.
+  const readyToGraduate =
+    !isDebug &&
+    egg.loaded &&
+    egg.state.currentSpecies !== null &&
+    currentStage === "adult";
+
+  const handleGraduate = () => {
+    if (!egg.state.currentSpecies) return;
+    egg.graduate(progress.xp);
+    setEggModalOpen(true);
+  };
+
+  // ── Render ──────────────────────────────────────────────────────
   return (
     <div className="mx-auto flex max-w-3xl flex-col gap-6 pb-12">
-      {/* ── Title row ─────────────────────────────────────────────── */}
+      {/* Title */}
       <div className="flex items-end justify-between gap-3 px-1">
         <div>
           <p className="font-pixel text-[10px] uppercase tracking-[0.25em] text-[var(--species-accent)]">
@@ -94,40 +175,54 @@ export default function HatchHomePage() {
             Hatch your blob.
           </h1>
         </div>
-        <FamilyBadge count={stage === "adult" ? 1 : 0} />
+        <FamilyBadge count={egg.state.family.length} />
       </div>
 
-      {/* ── Nameplate above the tank ──────────────────────────────── */}
       <Nameplate name={name} species={meta.label} icon={meta.icon} />
 
-      {/* ── The diorama ───────────────────────────────────────────── */}
       <Scene height={380} species={species}>
         <div className="relative my-2">
           <Blob species={species} stage={stage} squish={squish} size={300} />
         </div>
       </Scene>
 
-      {/* ── XP bar (real progression) ─────────────────────────────── */}
       <div className="px-1">
         <XPBar
           value={within.value}
           max={within.max}
           label={
             stageMeta.xpExit === null
-              ? "Fully grown · joins your family"
+              ? "Fully grown · ready to graduate"
               : `XP · ${Math.max(0, Math.ceil(within.max - within.value))} CRC to next stage`
           }
           tone={
-            species === "fire"
-              ? "fire"
-              : species === "plante"
-              ? "plante"
-              : "aqua"
+            species === "fire" ? "fire" : species === "plante" ? "plante" : "aqua"
           }
         />
       </div>
 
-      {/* ── Stat tile grid ────────────────────────────────────────── */}
+      {/* Graduate CTA — appears once the blob is fully grown */}
+      {readyToGraduate && (
+        <div className="cartridge flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <p className="font-pixel text-[10px] uppercase tracking-wider text-[var(--species-accent)]">
+              ★ {meta.label} is fully grown
+            </p>
+            <p className="mt-1 text-xs text-muted-foreground">
+              Add them to your Family album and pick the next egg.
+            </p>
+          </div>
+          <PixelButton
+            size="md"
+            variant="primary"
+            icon="🎓"
+            onClick={handleGraduate}
+          >
+            Graduate · pick next
+          </PixelButton>
+        </div>
+      )}
+
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
         <StatTile
           label="Age"
@@ -149,7 +244,6 @@ export default function HatchHomePage() {
         />
       </div>
 
-      {/* ── Action buttons ────────────────────────────────────────── */}
       <ActionRow
         kind={
           !wallet.isMiniappHost
@@ -166,7 +260,6 @@ export default function HatchHomePage() {
         visitSlot={<FriendsDialog onTipSent={onFeedSuccess} />}
       />
 
-      {/* ── Debug controls (hidden in prod) ───────────────────────── */}
       {isDebug && (
         <section className="mt-2 flex flex-col items-center gap-3 rounded-2xl border border-dashed border-border bg-card/60 p-4">
           <p className="font-pixel text-[10px] uppercase tracking-wider text-muted-foreground">
@@ -176,8 +269,28 @@ export default function HatchHomePage() {
             <SpeciesCycler current={demoSpecies} onChange={setDemoSpecies} />
             <StageCycler current={demoStage} onChange={setDemoStage} />
           </div>
+          <PixelButton
+            size="md"
+            variant="outline"
+            onClick={() => setEggModalOpen(true)}
+          >
+            Open egg picker
+          </PixelButton>
         </section>
       )}
+
+      {/* ── Egg picker modal ─────────────────────────────────────── */}
+      <EggSelectModal
+        open={eggModalOpen}
+        isFirstEgg={isFirstEgg}
+        onClose={isFirstEgg ? undefined : () => setEggModalOpen(false)}
+        onFreePick={handleFreePick}
+        onPaidPick={handlePaidPick}
+        onRandom={() => {
+          const p = handleRandom();
+          return p;
+        }}
+      />
     </div>
   );
 }
@@ -315,7 +428,6 @@ function FamilyBadge({ count }: { count: number }) {
 }
 
 function xpForDemoStage(stage: Stage): number {
-  // Midpoint within each stage, for clean preview.
   const meta = STAGE_META[stage];
   if (meta.xpExit === null) return meta.xpEnter;
   return Math.floor((meta.xpEnter + meta.xpExit) / 2);
