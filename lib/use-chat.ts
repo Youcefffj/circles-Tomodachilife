@@ -13,64 +13,93 @@ export type ChatMessage = {
 
 type Status = "loggedOut" | "signing" | "loggedIn" | "error";
 
+export type ChatDebug = {
+  lastPollAt: number | null;
+  lastPollStatus: string;
+  lastPollCount: number;
+  lastSendStatus: string;
+  totalMessages: number;
+};
+
 const LS_KEY = "hatch_chat_session_marker";
 const POLL_INTERVAL_MS = 3000;
 
 /**
  * Chat client hook — owns the sign-in flow + the polling loop.
  *
- * Sign-in:
- *   1. Generate a nonce + timestamp client-side
- *   2. signMessage("Hatch chat sign-in\n…")  via miniapp-sdk (Safe signs)
- *   3. POST /api/chat/login — server verifies via EIP-1271 isValidSignature
- *      on the Safe and sets an HMAC-signed httpOnly cookie
- *   4. We persist a localStorage marker so the UI knows to show the input
- *      next time (the cookie itself is httpOnly).
- *
- * Polling:
- *   GET /api/chat/messages?since=<lastTs>  every 3s while the page is open.
+ * After a successful send, we trigger an *immediate* re-pull rather than
+ * appending optimistically. This keeps the in-memory state in lock-step
+ * with what the server actually persisted and avoids stale dedupe bugs
+ * if the poll's `since` cursor lapses one message.
  */
 export function useChat() {
   const { address } = useWallet();
   const [status, setStatus] = useState<Status>("loggedOut");
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [debug, setDebug] = useState<ChatDebug>({
+    lastPollAt: null,
+    lastPollStatus: "—",
+    lastPollCount: 0,
+    lastSendStatus: "—",
+    totalMessages: 0,
+  });
   const sinceRef = useRef(0);
+  const pullRef = useRef<() => Promise<void>>(async () => {});
 
   // Restore "logged in" flag from localStorage on mount.
   useEffect(() => {
     if (typeof window === "undefined") return;
     if (window.localStorage.getItem(LS_KEY)) {
-      // eslint-disable-next-line react-hooks/set-state-in-effect
       setStatus("loggedIn");
     }
   }, []);
 
-  // Poll messages whenever we have a wallet (whether signed in or not —
-  // reading is public).
+  // Polling loop — pulls every 3s, latest first.
   useEffect(() => {
     let cancelled = false;
 
     const pull = async () => {
       try {
-        const res = await fetch(`/api/chat/messages?since=${sinceRef.current}`);
-        if (!res.ok) return;
-        const data = (await res.json()) as { messages?: ChatMessage[] };
-        if (cancelled || !data.messages || data.messages.length === 0) return;
+        const res = await fetch(`/api/chat/messages?since=${sinceRef.current}`, {
+          cache: "no-store",
+        });
+        const data = (await res.json()) as {
+          ok?: boolean;
+          messages?: ChatMessage[];
+          error?: string;
+        };
+        if (cancelled) return;
+
+        setDebug((d) => ({
+          ...d,
+          lastPollAt: Date.now(),
+          lastPollStatus: res.ok ? `${res.status} ok` : `${res.status} ${data.error ?? ""}`,
+          lastPollCount: data.messages?.length ?? 0,
+        }));
+
+        if (!res.ok || !data.messages || data.messages.length === 0) return;
+
         setMessages((prev) => {
           const merged = [...prev, ...data.messages!];
-          // dedupe by id, sorted
           const byId = new Map(merged.map((m) => [m.id, m]));
           const out = Array.from(byId.values()).sort((a, b) => a.ts - b.ts);
           sinceRef.current = out.length > 0 ? out[out.length - 1].ts : 0;
-          return out.slice(-150); // cap memory
+          setDebug((d) => ({ ...d, totalMessages: out.length }));
+          return out.slice(-150);
         });
-      } catch {
-        // network blip — try again next tick
+      } catch (err) {
+        if (cancelled) return;
+        console.error("[useChat] pull failed:", err);
+        setDebug((d) => ({
+          ...d,
+          lastPollAt: Date.now(),
+          lastPollStatus: `throw: ${err instanceof Error ? err.message : String(err)}`,
+        }));
       }
     };
 
-    // initial load grabs everything
+    pullRef.current = pull;
     sinceRef.current = 0;
     pull();
     const iv = setInterval(pull, POLL_INTERVAL_MS);
@@ -102,15 +131,17 @@ export function useChat() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ address, nonce, timestamp, signature }),
+        credentials: "include",
       });
       const data = (await res.json()) as { ok: boolean; error?: string };
-      if (!data.ok) throw new Error(data.error ?? "login failed");
+      if (!data.ok) throw new Error(data.error ?? `login http ${res.status}`);
 
       if (typeof window !== "undefined") {
         window.localStorage.setItem(LS_KEY, "1");
       }
       setStatus("loggedIn");
     } catch (err) {
+      console.error("[useChat] login failed:", err);
       setStatus("error");
       setError(err instanceof Error ? err.message : String(err));
       setTimeout(() => setStatus("loggedOut"), 2400);
@@ -120,36 +151,55 @@ export function useChat() {
   const send = useCallback(async (text: string) => {
     const trimmed = text.trim();
     if (!trimmed) return false;
+    setDebug((d) => ({ ...d, lastSendStatus: "sending…" }));
     try {
       const res = await fetch("/api/chat/post", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ text: trimmed }),
+        credentials: "include",
       });
+
+      let data: { ok?: boolean; message?: ChatMessage; error?: string } = {};
+      try {
+        data = (await res.json()) as typeof data;
+      } catch {
+        // body wasn't JSON — leave data empty
+      }
+
+      console.log("[useChat] POST /post", res.status, data);
+
+      setDebug((d) => ({
+        ...d,
+        lastSendStatus: res.ok
+          ? `${res.status} ok id=${data.message?.id ?? "—"}`
+          : `${res.status} ${data.error ?? ""}`,
+      }));
+
       if (res.status === 401) {
-        // Cookie expired — reset session.
         if (typeof window !== "undefined") {
           window.localStorage.removeItem(LS_KEY);
         }
         setStatus("loggedOut");
         return false;
       }
-      const data = (await res.json()) as { ok: boolean; message?: ChatMessage; error?: string };
-      if (!data.ok) {
-        setError(data.error ?? "send failed");
+      if (!res.ok || !data.ok) {
+        setError(data.error ?? `send failed (http ${res.status})`);
         return false;
       }
-      // Optimistic append; the next poll will reconcile by id.
-      if (data.message) {
-        setMessages((prev) => [...prev, data.message!].slice(-150));
-        sinceRef.current = data.message.ts;
-      }
+
+      // Force a fresh pull from the server — guaranteed to include
+      // whatever we just stored, no race with the interval timer.
+      sinceRef.current = 0;
+      await pullRef.current();
       return true;
     } catch (err) {
+      console.error("[useChat] send failed:", err);
       setError(err instanceof Error ? err.message : String(err));
+      setDebug((d) => ({ ...d, lastSendStatus: "throw" }));
       return false;
     }
   }, []);
 
-  return { status, messages, error, login, send };
+  return { status, messages, error, login, send, debug };
 }

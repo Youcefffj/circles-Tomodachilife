@@ -16,10 +16,18 @@ import { cn, shortenAddress } from "@/lib/utils";
 export default function ChatPage() {
   const wallet = useWallet();
   const sdk = useSdk();
-  const { status, messages, error, login, send } = useChat();
+  const { status, messages, error, login, send, debug } = useChat();
   const [draft, setDraft] = useState("");
   const [sending, setSending] = useState(false);
+  const [isDebug, setIsDebug] = useState(false);
   const listRef = useRef<HTMLOListElement>(null);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const sp = new URLSearchParams(window.location.search);
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setIsDebug(sp.get("debug") === "1");
+  }, []);
 
   // Auto-scroll to bottom whenever a new message lands.
   useEffect(() => {
@@ -128,6 +136,27 @@ export default function ChatPage() {
             <p className="font-pixel text-[10px] uppercase tracking-wider text-destructive">
               Sign-in failed: {truncate(error, 100)}
             </p>
+          </div>
+        )}
+
+        {isDebug && (
+          <div className="cartridge-sm grid grid-cols-2 gap-x-3 gap-y-1 p-3 font-mono text-[10px]">
+            <span className="text-muted-foreground">wallet</span>
+            <span className="text-foreground break-all">{wallet.address ?? "—"}</span>
+            <span className="text-muted-foreground">sdk</span>
+            <span className="text-foreground">{sdk.kind}{sdk.kind === "ready" ? ` · avatar=${sdk.hasAvatar}` : ""}</span>
+            <span className="text-muted-foreground">chat status</span>
+            <span className="text-foreground">{status}</span>
+            <span className="text-muted-foreground">last poll</span>
+            <span className="text-foreground">
+              {debug.lastPollAt ? new Date(debug.lastPollAt).toLocaleTimeString() : "—"} · {debug.lastPollStatus}
+            </span>
+            <span className="text-muted-foreground">last poll count</span>
+            <span className="text-foreground">{debug.lastPollCount}</span>
+            <span className="text-muted-foreground">last send</span>
+            <span className="text-foreground">{debug.lastSendStatus}</span>
+            <span className="text-muted-foreground">total in state</span>
+            <span className="text-foreground">{messages.length}</span>
           </div>
         )}
 
