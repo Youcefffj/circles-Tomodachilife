@@ -2,6 +2,11 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 
+import {
+  clearSessionToken,
+  readSessionToken,
+  writeSessionToken,
+} from "@/lib/auth-token";
 import { useWallet } from "@/components/wallet/WalletProvider";
 
 export type ChatMessage = {
@@ -22,42 +27,14 @@ export type ChatDebug = {
   hasToken: boolean;
 };
 
-const LS_TOKEN_KEY = "hatch_chat_token";
-const LS_EXP_KEY = "hatch_chat_token_exp";
 const POLL_INTERVAL_MS = 3000;
-
-function readToken(): string | null {
-  if (typeof window === "undefined") return null;
-  const token = window.localStorage.getItem(LS_TOKEN_KEY);
-  const exp = Number(window.localStorage.getItem(LS_EXP_KEY) ?? 0);
-  if (!token || !exp) return null;
-  if (exp * 1000 < Date.now()) {
-    window.localStorage.removeItem(LS_TOKEN_KEY);
-    window.localStorage.removeItem(LS_EXP_KEY);
-    return null;
-  }
-  return token;
-}
-
-function writeToken(token: string, expiresAt: number) {
-  if (typeof window === "undefined") return;
-  window.localStorage.setItem(LS_TOKEN_KEY, token);
-  window.localStorage.setItem(LS_EXP_KEY, String(expiresAt));
-}
-
-function clearToken() {
-  if (typeof window === "undefined") return;
-  window.localStorage.removeItem(LS_TOKEN_KEY);
-  window.localStorage.removeItem(LS_EXP_KEY);
-}
 
 /**
  * Chat client hook — owns the sign-in flow + the polling loop.
  *
- * Auth uses a Bearer token (sent in Authorization header) rather than a
- * cookie, because Safari + iframe-aware Chrome strip cookies in cross-
- * site iframe contexts (the Circles playground). Tokens are HMAC-signed
- * server-side and live in localStorage; lifetime is 24h.
+ * After a successful sign-in we also dispatch a `hatch:signed-in` event
+ * on `window`. The egg-state hook listens for this and pushes the
+ * current local state to the server as the initial cross-device backup.
  */
 export function useChat() {
   const { address } = useWallet();
@@ -77,7 +54,7 @@ export function useChat() {
 
   // Restore session token from localStorage on mount.
   useEffect(() => {
-    const token = readToken();
+    const token = readSessionToken();
     if (token) {
       setStatus("loggedIn");
       setDebug((d) => ({ ...d, hasToken: true }));
@@ -171,9 +148,14 @@ export function useChat() {
         throw new Error(data.error ?? `login http ${res.status}`);
       }
 
-      writeToken(data.token, data.expiresAt);
+      writeSessionToken(data.token, data.expiresAt);
       setStatus("loggedIn");
       setDebug((d) => ({ ...d, hasToken: true }));
+
+      // Notify other hooks (egg-state sync, etc.) that auth just landed.
+      if (typeof window !== "undefined") {
+        window.dispatchEvent(new CustomEvent("hatch:signed-in"));
+      }
     } catch (err) {
       console.error("[useChat] login failed:", err);
       setStatus("error");
@@ -186,7 +168,7 @@ export function useChat() {
     const trimmed = text.trim();
     if (!trimmed) return false;
 
-    const token = readToken();
+    const token = readSessionToken();
     if (!token) {
       setStatus("loggedOut");
       setDebug((d) => ({ ...d, hasToken: false, lastSendStatus: "no token" }));
@@ -221,7 +203,7 @@ export function useChat() {
       }));
 
       if (res.status === 401) {
-        clearToken();
+        clearSessionToken();
         setStatus("loggedOut");
         setDebug((d) => ({ ...d, hasToken: false }));
         setError("session expired — sign in again");
@@ -232,7 +214,6 @@ export function useChat() {
         return false;
       }
 
-      // Force fresh pull — guaranteed to include what we just stored.
       sinceRef.current = 0;
       await pullRef.current();
       return true;
