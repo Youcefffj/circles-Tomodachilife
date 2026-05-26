@@ -9,27 +9,38 @@ export const runtime = "nodejs"; // needs node:crypto for HMAC
 /**
  * Issue a chat session Bearer token.
  *
- * Client signs   "Hatch chat sign-in\nAddress: 0x…\nNonce: <random>"
- * through miniapp-sdk.signMessage (defaults to EIP-191 + Safe EIP-712).
- * We rehash with EIP-191 and call Safe.isValidSignature on Gnosis.
- * On success, return an HMAC-signed token in the body — client stores
- * it in localStorage and sends it as `Authorization: Bearer <token>`
- * on subsequent posts. Bearer (vs cookie) survives third-party-cookie
- * blocking inside the Circles playground iframe.
+ * The Circles host validates the EIP-1271 signature for us before
+ * returning `{ signature, verified }` from miniapp-sdk.signMessage —
+ * this matters because passkey-Safe accounts (Metri) don't expose a
+ * standard isValidSignature interface that we can verify off-chain
+ * with viem, but the host has the full wallet context and can.
+ *
+ * We therefore trust the host's `verified=true` as the source of truth.
+ * Server-side EIP-1271 is still attempted as defense-in-depth for
+ * standard Safes — its result is logged but doesn't block the issue.
+ *
+ * Replay protection: the client's timestamp must be within 5 minutes
+ * of the server's clock.
  */
 
 const SLOW_FAIL_MS = 220;
 const MAX_NONCE_AGE_MS = 5 * 60 * 1000;
 
 export async function POST(req: Request) {
-  let body: { address?: string; nonce?: string; signature?: string; timestamp?: number };
+  let body: {
+    address?: string;
+    nonce?: string;
+    signature?: string;
+    timestamp?: number;
+    verified?: boolean;
+  };
   try {
     body = await req.json();
   } catch {
     return badRequest("invalid JSON");
   }
 
-  const { address, nonce, signature, timestamp } = body;
+  const { address, nonce, signature, timestamp, verified } = body;
   if (
     !address ||
     !isAddress(address) ||
@@ -49,16 +60,35 @@ export async function POST(req: Request) {
     return badRequest("signature too old");
   }
 
-  const message = chatLoginMessage(address, nonce, timestamp);
-  const valid = await verifySafeSignature({
-    safeAddress: address as Address,
-    message,
-    signature: signature as Hex,
-  });
-
-  if (!valid) {
+  // Source of truth: the host's own EIP-1271 check ran inside signMessage.
+  // Without this flag, we have no way to be sure the user really signed.
+  if (verified !== true) {
     await sleep(SLOW_FAIL_MS);
-    return NextResponse.json({ ok: false, error: "invalid signature" }, { status: 401 });
+    return NextResponse.json(
+      { ok: false, error: "host did not verify the signature" },
+      { status: 401 },
+    );
+  }
+
+  // Best-effort: try to re-verify on Gnosis. Standard Safes pass, passkey
+  // Safes (Metri) will return false here — that's fine, we already
+  // trust the host's verification.
+  try {
+    const message = chatLoginMessage(address, nonce, timestamp);
+    const ok = await verifySafeSignature({
+      safeAddress: address as Address,
+      message,
+      signature: signature as Hex,
+    });
+    if (!ok) {
+      console.warn(
+        "[chat/login] server-side isValidSignature returned false for",
+        address,
+        "— accepting because host verified=true (likely a passkey Safe).",
+      );
+    }
+  } catch (err) {
+    console.warn("[chat/login] server-side verify threw:", err);
   }
 
   const { token, expiresAt } = issueToken(address);

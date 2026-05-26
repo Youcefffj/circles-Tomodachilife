@@ -154,12 +154,12 @@ export function useChat() {
         "Issued by hatchlife.vercel.app for chat access.",
       ].join("\n");
 
-      const { signature } = await signMessage(text);
+      const { signature, verified } = await signMessage(text);
 
       const res = await fetch("/api/chat/login", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ address, nonce, timestamp, signature }),
+        body: JSON.stringify({ address, nonce, timestamp, signature, verified }),
       });
       const data = (await res.json()) as {
         ok: boolean;
