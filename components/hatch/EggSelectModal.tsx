@@ -16,26 +16,21 @@ type State =
 /**
  * The egg-picker modal.
  *
- *   isFirstEgg   true  → free choice (no CRC sink)
- *                false → "Choose" costs 2 CRC (handled by parent via onPaidPick)
- *                "Random" is always free.
- *
- *   onFreePick   — called for first-egg picks and for Random
- *   onPaidPick   — async; parent does the 2-CRC transfer.advanced + resolves
- *                  once on-chain.
+ *   isFirstEgg only controls the heading copy ("Welcome to Hatch" vs
+ *   "Pick your next egg"). Pricing is uniform: choosing a specific
+ *   species always costs 2 CRC (routed to a random trustée via
+ *   transfer.advanced), Random is always free.
  */
 export function EggSelectModal({
   open,
   isFirstEgg,
   onClose,
-  onFreePick,
   onPaidPick,
   onRandom,
 }: {
   open: boolean;
   isFirstEgg: boolean;
   onClose?: () => void;
-  onFreePick: (species: Species) => void;
   onPaidPick: (species: Species) => Promise<void>;
   onRandom: () => Species;
 }) {
@@ -44,10 +39,6 @@ export function EggSelectModal({
   if (!open) return null;
 
   const handlePick = async (species: Species) => {
-    if (isFirstEgg) {
-      onFreePick(species);
-      return;
-    }
     setState({ kind: "transferring", target: species });
     try {
       await onPaidPick(species);
@@ -81,14 +72,11 @@ export function EggSelectModal({
             {isFirstEgg ? "Welcome to Hatch" : "Pick your next egg"}
           </p>
           <h2 className="font-pixel mt-2 text-xl text-foreground sm:text-2xl">
-            {isFirstEgg
-              ? "Choose your first egg."
-              : "Random is free. Picking costs 2 CRC."}
+            Random is free. Picking costs 2 CRC.
           </h2>
           <p className="mt-2 text-xs text-muted-foreground">
-            {isFirstEgg
-              ? "You'll grow your blob over the next few days. Each species has its own world."
-              : "The 2 CRC goes to a random friend in your trust circle — it feeds their blob."}
+            The 2 CRC goes to a random friend in your trust circle — it feeds
+            their blob. No trustées yet? Take Random and trust someone later.
           </p>
         </div>
 
@@ -117,7 +105,7 @@ export function EggSelectModal({
                   {meta.label}
                 </span>
                 <span className="font-pixel text-[9px] uppercase tracking-wider text-muted-foreground">
-                  {busy ? "Sending…" : isFirstEgg ? "Free" : "2 CRC"}
+                  {busy ? "Sending…" : "2 CRC"}
                 </span>
               </button>
             );
@@ -135,20 +123,18 @@ export function EggSelectModal({
           </div>
         )}
 
-        {/* ── Random or close ─────────────────────────────────────── */}
+        {/* ── Random + dismiss ────────────────────────────────────── */}
         <div className="mt-6 flex flex-col gap-2 sm:flex-row">
-          {!isFirstEgg && (
-            <PixelButton
-              size="lg"
-              variant="outline"
-              icon="🎲"
-              onClick={handleRandom}
-              disabled={state.kind === "transferring"}
-              className="flex-1"
-            >
-              Random · Free
-            </PixelButton>
-          )}
+          <PixelButton
+            size="lg"
+            variant="outline"
+            icon="🎲"
+            onClick={handleRandom}
+            disabled={state.kind === "transferring"}
+            className="flex-1"
+          >
+            Random · Free
+          </PixelButton>
           {onClose && state.kind !== "transferring" && (
             <button
               type="button"

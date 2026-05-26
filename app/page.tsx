@@ -127,11 +127,6 @@ export default function HatchHomePage() {
   const onFeedSuccess = () => progress.refresh();
 
   // ── Egg picker handlers ─────────────────────────────────────────
-  const handleFreePick = (s: Species) => {
-    egg.chooseSpecies(s);
-    setEggModalOpen(false);
-  };
-
   const handleRandom = () => {
     const picked = egg.pickRandom();
     setEggModalOpen(false);
@@ -139,9 +134,13 @@ export default function HatchHomePage() {
   };
 
   /**
-   * Paid choice (2 CRC). Sends to a random member of the user's trust
-   * circle — keeps the CRC inside the network. If no trustees, we error
-   * out so the user falls back to Random or trusts someone first.
+   * Paid pick — 2 CRC sent to a random member of the user's trust circle.
+   * Same flow for the first egg and every subsequent one: choosing always
+   * costs, Random is always free. The CRC stays in the Circles network
+   * (feeds a friend's blob), never burned.
+   *
+   * If the user has no trustées (often the case right after sign-up), we
+   * throw a clear error so they fall back to Random or trust someone first.
    */
   const handlePaidPick = async (s: Species) => {
     if (sdk.kind !== "ready" || !sdk.avatar) {
@@ -153,7 +152,9 @@ export default function HatchHomePage() {
       (r) => r.relation === "trusts" || r.relation === "mutuallyTrusts",
     );
     if (eligible.length === 0) {
-      throw new Error("No trusted friend to receive the 2 CRC — pick Random or trust someone first.");
+      throw new Error(
+        "No trustée to receive the 2 CRC — pick Random for now, then trust someone in the Circles app.",
+      );
     }
     const target = eligible[Math.floor(Math.random() * eligible.length)].objectAvatar;
     await avatar.transfer.advanced(target, BigInt(EGG_PRICE_CRC) * BigInt(1e18));
@@ -299,7 +300,6 @@ export default function HatchHomePage() {
         // Picks are mandatory whenever there's no growing blob — first time
         // or post-graduation. Only debug-opened pickers can be dismissed.
         onClose={needsEgg ? undefined : () => setEggModalOpen(false)}
-        onFreePick={handleFreePick}
         onPaidPick={handlePaidPick}
         onRandom={() => handleRandom()}
       />
