@@ -31,6 +31,15 @@ const SdkContext = createContext<SdkState>({ kind: "idle" });
 /**
  * Lazily builds an `@aboutcircles/sdk` instance + the user's Avatar once a
  * wallet is injected by the host. Re-builds on address change.
+ *
+ * Detection of "is this address a registered Circles avatar" uses
+ * `sdk.rpc.profile.getProfileView()` (the documented read primitive,
+ * which returns `undefined` for unregistered EOAs instead of throwing).
+ * The Avatar instance is built separately via `sdk.getAvatar()` so write
+ * methods (mint, transfer, trust) have a working ContractRunner. If
+ * `getAvatar` throws for a registered avatar (happens when the on-chain
+ * cidV0Digest is empty), we keep `hasAvatar=true` and leave avatar=null;
+ * write components surface that gracefully.
  */
 export function SdkProvider({ children }: { children: ReactNode }) {
   const { address } = useWallet();
@@ -39,8 +48,6 @@ export function SdkProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     let cancelled = false;
 
-    // All state updates happen inside async work — defers them off the
-    // synchronous effect body (React 19 hook-rule friendly).
     const run = async () => {
       if (!address) {
         if (!cancelled) setState({ kind: "idle" });
@@ -60,14 +67,41 @@ export function SdkProvider({ children }: { children: ReactNode }) {
           runner?: unknown,
         ) => unknown)(undefined, runner);
 
-        let avatar: LooseSdk | null = null;
+        // ── Detection: is this a registered Circles avatar?
+        // Use the read-friendly view, NOT getAvatar — getAvatar throws
+        // for valid-but-empty profiles, which would lock out fresh users.
         let hasAvatar = false;
         try {
-          avatar = await (sdk as { getAvatar: (a: Address) => Promise<LooseSdk> })
-            .getAvatar(address as Address);
-          hasAvatar = !!avatar;
-        } catch {
-          // Not a registered Circles avatar — fall through with no avatar.
+          const view = await (
+            sdk as {
+              rpc: {
+                profile: {
+                  getProfileView: (
+                    a: Address,
+                  ) => Promise<{ avatarInfo?: unknown }>;
+                };
+              };
+            }
+          ).rpc.profile.getProfileView(address as Address);
+          hasAvatar = !!view.avatarInfo;
+        } catch (err) {
+          console.warn("[SdkProvider] getProfileView failed:", err);
+        }
+
+        // ── Write-capable Avatar instance — best-effort. If it throws
+        // even when hasAvatar is true, write components show an error
+        // when the user tries to act, but reads still work.
+        let avatar: LooseSdk | null = null;
+        if (hasAvatar) {
+          try {
+            avatar = await (sdk as { getAvatar: (a: Address) => Promise<LooseSdk> })
+              .getAvatar(address as Address);
+          } catch (err) {
+            console.warn(
+              "[SdkProvider] getAvatar failed for registered avatar:",
+              err,
+            );
+          }
         }
 
         if (cancelled) return;

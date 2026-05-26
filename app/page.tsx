@@ -88,22 +88,35 @@ export default function HatchHomePage() {
     (wallet.address ? capitalize(nameFromSeed(wallet.address)) : "Bubbly");
 
   // ── Egg modal control ──────────────────────────────────────────
+  // Two separate concepts:
+  //   needsEgg    — there is no growing blob right now, the modal must open
+  //   isFirstEgg  — the user has *never* graduated a blob; picks are free.
+  //                 After the first graduation, even if currentSpecies is
+  //                 null, subsequent eggs cost 2 CRC (or Random for free).
   const [eggModalOpen, setEggModalOpen] = useState(false);
-  const isFirstEgg = egg.loaded && egg.state.currentSpecies === null;
+  const needsEgg = egg.loaded && egg.state.currentSpecies === null;
+  const isFirstEgg = needsEgg && egg.state.family.length === 0;
 
-  // Auto-open on first connect (no choice yet, but everything is loaded).
+  // Auto-open the picker whenever the user has no growing blob. We track
+  // it with a one-shot flag so dismissals or other state changes don't
+  // re-open it. The modal re-arms when needsEgg flips true again (after
+  // a graduate).
+  const [autoOpenedFor, setAutoOpenedFor] = useState<string | null>(null);
   useEffect(() => {
+    const key = `${egg.state.family.length}:${needsEgg}`;
     if (
       sdk.kind === "ready" &&
       sdk.hasAvatar &&
       egg.loaded &&
-      isFirstEgg &&
-      !isDebug
+      needsEgg &&
+      !isDebug &&
+      autoOpenedFor !== key
     ) {
       // eslint-disable-next-line react-hooks/set-state-in-effect
       setEggModalOpen(true);
+      setAutoOpenedFor(key);
     }
-  }, [sdk, egg.loaded, isFirstEgg, isDebug]);
+  }, [sdk, egg.loaded, egg.state.family.length, needsEgg, isDebug, autoOpenedFor]);
 
   // ── World repaint ───────────────────────────────────────────────
   useEffect(() => {
@@ -283,13 +296,12 @@ export default function HatchHomePage() {
       <EggSelectModal
         open={eggModalOpen}
         isFirstEgg={isFirstEgg}
-        onClose={isFirstEgg ? undefined : () => setEggModalOpen(false)}
+        // Picks are mandatory whenever there's no growing blob — first time
+        // or post-graduation. Only debug-opened pickers can be dismissed.
+        onClose={needsEgg ? undefined : () => setEggModalOpen(false)}
         onFreePick={handleFreePick}
         onPaidPick={handlePaidPick}
-        onRandom={() => {
-          const p = handleRandom();
-          return p;
-        }}
+        onRandom={() => handleRandom()}
       />
     </div>
   );
