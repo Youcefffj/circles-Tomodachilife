@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { isAddress, type Address, type Hex } from "viem";
 
+import { getRedis, USERS_SET_KEY } from "@/lib/server/redis";
 import { verifySafeSignature } from "@/lib/server/safe-verify";
 import { issueToken } from "@/lib/server/session";
 
@@ -92,6 +93,18 @@ export async function POST(req: Request) {
   }
 
   const { token, expiresAt } = issueToken(address);
+
+  // Register the user in the global Hatch directory so the leaderboard
+  // can find them. Best-effort — failure here shouldn't block sign-in.
+  try {
+    const redis = getRedis();
+    if (redis) {
+      await redis.sadd(USERS_SET_KEY, address.toLowerCase());
+    }
+  } catch (err) {
+    console.warn("[chat/login] users SADD failed:", err);
+  }
+
   return NextResponse.json({
     ok: true,
     address: address.toLowerCase(),

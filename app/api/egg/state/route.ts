@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 
-import { getRedis } from "@/lib/server/redis";
+import { getRedis, USERS_SET_KEY } from "@/lib/server/redis";
 import { bearerFrom, verifyToken } from "@/lib/server/session";
 import { SHIPPED_SPECIES, type Species } from "@/lib/hatch";
 
@@ -103,6 +103,13 @@ export async function PUT(req: Request) {
   await redis.set(KEY(session.address), JSON.stringify(payload), {
     ex: ONE_YEAR_S,
   });
+  // Keep the global directory in sync so the leaderboard picks up
+  // anyone who has ever saved state.
+  try {
+    await redis.sadd(USERS_SET_KEY, session.address);
+  } catch {
+    // ignore
+  }
 
   return NextResponse.json({ ok: true, state: payload });
 }

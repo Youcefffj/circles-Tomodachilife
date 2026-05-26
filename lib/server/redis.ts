@@ -28,3 +28,6 @@ export function getRedis(): Redis | null {
 
 export const CHAT_LIST_KEY = "hatch:chat:messages";
 export const CHAT_MAX_LENGTH = 200;
+
+/** Set of every address that has ever signed in or saved egg state. */
+export const USERS_SET_KEY = "hatch:users";

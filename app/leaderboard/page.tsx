@@ -52,14 +52,14 @@ export default function LeaderboardPage() {
       <div className="flex items-start justify-between gap-4 px-1">
         <div>
           <p className="font-pixel text-[10px] uppercase tracking-[0.25em] text-[var(--species-accent)]">
-            Leaderboard
+            Global Leaderboard
           </p>
           <h1 className="font-pixel mt-1 text-2xl text-foreground sm:text-3xl">
-            Your trust circle, ranked.
+            Everyone in Hatch, ranked.
           </h1>
           <p className="mt-2 max-w-md text-sm text-muted-foreground">
-            Visit any friend, feed their blob, watch them climb. Refresh after
-            tipping to see the order shift.
+            Every Hatch player who has signed in. You&apos;re always in the
+            list — tip anyone to push them up, or feed your own blob to climb.
           </p>
         </div>
       </div>
@@ -76,25 +76,19 @@ export default function LeaderboardPage() {
         <CartridgeMsg
           icon="🐣"
           title="Register a Circles avatar first"
-          subtitle="Sign up at metri.xyz, then trust some folks to build your leaderboard."
+          subtitle="Sign up at metri.xyz, then come back — you'll show up on the board."
         />
       )}
 
-      {sdk.kind === "ready" && sdk.hasAvatar && loading && rows.length === 0 && (
+      {sdk.kind === "ready" && loading && rows.length === 0 && (
         <CartridgeMsg
           icon="⏳"
-          title="Computing your friends' XP…"
-          subtitle="One RPC roundtrip per friend — usually 1-3 seconds."
+          title="Computing the board…"
+          subtitle="Pulling every Hatch player's XP from the indexer."
         />
       )}
 
-      {sdk.kind === "ready" && sdk.hasAvatar && !loading && rows.length === 0 && !error && (
-        <CartridgeMsg
-          icon="🌱"
-          title="No friends in your trust circle yet"
-          subtitle="Trust someone on Circles, come back, and they'll show up here."
-        />
-      )}
+      {/* No "empty list" state needed — the user is always in the list. */}
 
       {error && (
         <div className="cartridge p-5">
@@ -168,11 +162,18 @@ function PodiumCard({
       className={cn(
         "cartridge relative flex flex-col items-center gap-2 p-4 text-center",
         rank === 1 && "ring-2 ring-[var(--gold)] ring-offset-2 ring-offset-background",
+        row.isMe &&
+          "ring-2 ring-[var(--species-accent)] ring-offset-2 ring-offset-background",
       )}
     >
       <span className="absolute right-3 top-3 text-2xl" aria-hidden>
         {medal}
       </span>
+      {row.isMe && (
+        <span className="font-pixel absolute left-3 top-3 rounded bg-[var(--species-accent)] px-1.5 py-0.5 text-[9px] uppercase tracking-wider text-[var(--cream)]">
+          You
+        </span>
+      )}
 
       <div className="my-2">
         <Blob species={species} stage={row.stage} size={120} />
@@ -196,7 +197,13 @@ function PodiumCard({
         {fmtXp(row.xp)} XP
       </div>
 
-      <TipBtn state={tipState} onTip={onTip} disabled={!canTip} />
+      {row.isMe ? (
+        <span className="font-pixel rounded-md border-2 border-dashed border-[var(--border)] px-3 py-1.5 text-[10px] uppercase tracking-wider text-muted-foreground">
+          That&apos;s you
+        </span>
+      ) : (
+        <TipBtn state={tipState} onTip={onTip} disabled={!canTip} />
+      )}
     </div>
   );
 }
@@ -219,7 +226,12 @@ function ListRow({
   const stageMeta = STAGE_META[row.stage];
 
   return (
-    <div className="cartridge-sm flex items-center gap-3 px-3 py-2.5">
+    <div
+      className={cn(
+        "cartridge-sm flex items-center gap-3 px-3 py-2.5",
+        row.isMe && "ring-1 ring-[var(--species-accent)]",
+      )}
+    >
       <span className="font-pixel w-6 text-center text-[11px] text-muted-foreground">
         #{rank}
       </span>
@@ -227,8 +239,13 @@ function ListRow({
         <Blob species={species} stage={row.stage} size={56} />
       </div>
       <div className="flex min-w-0 flex-1 flex-col">
-        <span className="font-pixel truncate text-[11px] text-foreground">
+        <span className="font-pixel flex items-center gap-1.5 truncate text-[11px] text-foreground">
           {row.name ?? capitalize(nameFromSeed(row.address))}
+          {row.isMe && (
+            <span className="font-pixel rounded bg-[var(--species-accent)] px-1 py-px text-[8px] uppercase tracking-wider text-[var(--cream)]">
+              You
+            </span>
+          )}
         </span>
         <span className="font-pixel text-[9px] uppercase tracking-wider text-muted-foreground">
           {meta.icon} {meta.label} · {stageMeta.label} ·{" "}
@@ -238,7 +255,13 @@ function ListRow({
       <div className="font-pixel flex shrink-0 flex-col items-end gap-0.5 text-[11px] text-[var(--species-accent)]">
         {fmtXp(row.xp)} XP
       </div>
-      <TipBtn state={tipState} onTip={onTip} disabled={!canTip} small />
+      {row.isMe ? (
+        <span className="font-pixel rounded-md border border-dashed border-[var(--border)] px-2 py-1 text-[9px] uppercase tracking-wider text-muted-foreground">
+          you
+        </span>
+      ) : (
+        <TipBtn state={tipState} onTip={onTip} disabled={!canTip} small />
+      )}
     </div>
   );
 }

@@ -5,16 +5,10 @@ import { useEffect, useMemo, useState } from "react";
 import { useSdk } from "@/components/wallet/SdkProvider";
 import { stageFromXp, type Stage } from "@/lib/hatch";
 
-type TrustRow = {
-  subjectAvatar: string;
-  objectAvatar: string;
-  relation: "trusts" | "trustedBy" | "mutuallyTrusts";
-};
-
 type HistoryRow = {
   from?: string;
   to?: string;
-  // Indexer returns numerics as JSON strings — coerce before arithmetic.
+  // RPC returns numeric fields as strings — coerce before arithmetic.
   crc?: number | string;
   staticCircles?: number | string;
 };
@@ -28,10 +22,6 @@ function rowAmount(r: HistoryRow): number {
 }
 
 type ProfileViewMini = { profile?: { name?: string } };
-
-type AvatarLike = {
-  trust: { getAll: () => Promise<TrustRow[]> };
-};
 
 type SdkRead = {
   rpc: {
@@ -53,16 +43,22 @@ export type LeaderboardRow = {
   xp: number;
   stage: Stage;
   feedersCount: number;
-  relation: TrustRow["relation"];
+  isMe: boolean;
 };
 
+const MAX_ROWS = 50; // cap fan-out to keep the indexer happy
+
 /**
- * Builds a ranked list of the user's trust circle by computing each
- * friend's XP (= cumulative incoming CRC) from their history.
+ * Global Hatch leaderboard.
  *
- * Fan-out is intentional: ~20-50 parallel RPC calls is fine for
- * Circles' indexer. Results are sorted XP desc and cached on the
- * sdkState identity (no manual revalidation needed).
+ * Fetches the list of every Hatch user from `/api/users` (a Redis set
+ * populated whenever someone signs in or saves egg state), then in
+ * parallel pulls each one's transaction history + profile to compute
+ * their XP. Sorts XP desc. The current user is always included.
+ *
+ * Capped at MAX_ROWS to bound fan-out. Tuned for Garage MVP scale —
+ * if the user count grows beyond a few hundred we'd want a server-
+ * side aggregation pass instead.
  */
 export function useFriendsLeaderboard(): {
   rows: LeaderboardRow[];
@@ -75,21 +71,14 @@ export function useFriendsLeaderboard(): {
   const [error, setError] = useState<string | null>(null);
 
   const ready = sdkState.kind === "ready";
-  const hasAvatar = sdkState.kind === "ready" ? sdkState.hasAvatar : false;
-  const avatar = useMemo(
-    () =>
-      sdkState.kind === "ready" && sdkState.hasAvatar
-        ? (sdkState.avatar as AvatarLike | null)
-        : null,
-    [sdkState],
-  );
+  const myAddress = sdkState.kind === "ready" ? sdkState.address : null;
   const sdkRef = useMemo(
     () => (sdkState.kind === "ready" ? (sdkState.sdk as SdkRead) : null),
     [sdkState],
   );
 
   useEffect(() => {
-    if (!ready || !hasAvatar || !avatar || !sdkRef) {
+    if (!ready || !sdkRef || !myAddress) {
       // eslint-disable-next-line react-hooks/set-state-in-effect
       setRows([]);
       return;
@@ -101,23 +90,22 @@ export function useFriendsLeaderboard(): {
       setError(null);
 
       try {
-        // 1. Resolve the user's outgoing + mutual trust links.
-        const all = await avatar.trust.getAll();
-        const outgoing = all.filter(
-          (r) => r.relation === "trusts" || r.relation === "mutuallyTrusts",
+        // 1. Pull the global directory.
+        const res = await fetch("/api/users", { cache: "no-store" });
+        const data = (await res.json()) as { users?: string[] };
+        const directory = new Set<string>(
+          (data.users ?? []).map((a) => a.toLowerCase()),
         );
 
-        if (cancelled) return;
-        if (outgoing.length === 0) {
-          setRows([]);
-          setLoading(false);
-          return;
-        }
+        // Always include the current user, even if registration hasn't
+        // landed in the SET yet (first connect, pre sign-in, etc.).
+        directory.add(myAddress.toLowerCase());
 
-        // 2. Fan-out: for each friend, fetch their history + profile.
+        const addresses = Array.from(directory).slice(0, MAX_ROWS);
+
+        // 2. Fan-out: per-user history + profile, parallel.
         const results: LeaderboardRow[] = await Promise.all(
-          outgoing.map(async (rel) => {
-            const addr = rel.objectAvatar;
+          addresses.map(async (addr) => {
             const [history, profile] = await Promise.allSettled([
               sdkRef.rpc.transaction.getTransactionHistory(
                 addr as `0x${string}`,
@@ -129,12 +117,11 @@ export function useFriendsLeaderboard(): {
             let xp = 0;
             const feeders = new Set<string>();
             if (history.status === "fulfilled") {
-              const me = addr.toLowerCase();
               for (const row of history.value.results ?? []) {
-                if (row.to?.toLowerCase() === me) {
+                if (row.to?.toLowerCase() === addr) {
                   xp += rowAmount(row);
                   const from = row.from?.toLowerCase();
-                  if (from && from !== me) feeders.add(from);
+                  if (from && from !== addr) feeders.add(from);
                 }
               }
             }
@@ -150,7 +137,7 @@ export function useFriendsLeaderboard(): {
               xp,
               stage: stageFromXp(xp),
               feedersCount: feeders.size,
-              relation: rel.relation,
+              isMe: addr === myAddress.toLowerCase(),
             };
           }),
         );
@@ -170,7 +157,7 @@ export function useFriendsLeaderboard(): {
     return () => {
       cancelled = true;
     };
-  }, [ready, hasAvatar, avatar, sdkRef]);
+  }, [ready, sdkRef, myAddress]);
 
   return { rows, loading, error };
 }
