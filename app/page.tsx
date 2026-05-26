@@ -13,6 +13,7 @@ import { XPBar } from "@/components/hatch/XPBar";
 import { useWallet } from "@/components/wallet/WalletProvider";
 import { useSdk } from "@/components/wallet/SdkProvider";
 import { useBlobProgress } from "@/lib/use-blob-progress";
+import { useProfile } from "@/lib/use-profile";
 import {
   SPECIES,
   STAGE_META,
@@ -37,6 +38,7 @@ export default function HatchHomePage() {
   const wallet = useWallet();
   const sdk = useSdk();
   const progress = useBlobProgress();
+  const profile = useProfile();
 
   // Debug-mode demo state (only used when ?debug=1)
   const [demoSpecies, setDemoSpecies] = useState<Species>("aqua");
@@ -62,11 +64,18 @@ export default function HatchHomePage() {
   const stageMeta = STAGE_META[stage];
   const within = xpInStage(xp, stage);
   const meta = SPECIES[species];
-  const name = wallet.address ? capitalize(nameFromSeed(wallet.address)) : "Bubbly";
+  // Prefer the user's real Circles profile name; fall back to a deterministic
+  // cute name derived from the address if they haven't set one yet.
+  const name =
+    profile?.name?.trim() ||
+    (wallet.address ? capitalize(nameFromSeed(wallet.address)) : "Bubbly");
 
-  // Paint the world to match the active species (cascades through all CSS vars).
+  // Paint the world to match the active species + persist the choice in a
+  // cookie so the inline bootstrap script can pre-apply it on next visit
+  // (no palette flash). Cascades through every species-themed CSS var.
   useEffect(() => {
     document.documentElement.dataset.species = species;
+    document.cookie = `hatch_species=${species}; max-age=31536000; path=/; SameSite=Lax`;
   }, [species]);
 
   const onFeedSuccess = () => {
