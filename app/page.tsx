@@ -7,7 +7,6 @@ import { EggSelectModal } from "@/components/hatch/EggSelectModal";
 import { FeedButton } from "@/components/hatch/FeedButton";
 import { FriendsDialog } from "@/components/hatch/FriendsDialog";
 import { PixelButton } from "@/components/hatch/PixelButton";
-import { QrCode } from "@/components/hatch/QrCode";
 import { Scene } from "@/components/hatch/Scene";
 import { SpeciesCycler } from "@/components/hatch/SpeciesCycler";
 import { StageCycler } from "@/components/hatch/StageCycler";
@@ -311,35 +310,23 @@ function ActionRow({
     const APP_URL = "https://hatchlife.vercel.app/";
     const PLAYGROUND_URL = `https://circles.gnosis.io/playground?url=${encodeURIComponent(APP_URL)}`;
     return (
-      <div className="cartridge flex flex-col items-center gap-5 p-6 text-center">
-        <div className="space-y-1">
-          <p className="font-pixel text-[10px] uppercase tracking-[0.25em] text-[var(--species-accent)]">
-            Step into Hatch
-          </p>
-          <p className="font-pixel text-base text-foreground">
-            Scan with your phone to start.
-          </p>
-          <p className="text-xs text-muted-foreground">
-            Hatch lives inside the Circles host. Point your camera at the
-            code — it opens the playground with your wallet ready.
-          </p>
-        </div>
-
-        <QrCode url={PLAYGROUND_URL} size={220} alt="Open HatchLife in Circles" />
-
-        <div className="flex flex-col items-center gap-2">
-          <p className="font-pixel text-[9px] uppercase tracking-wider text-muted-foreground">
-            On the same device?
-          </p>
-          <a
-            className="font-pixel text-xs uppercase tracking-wider text-[var(--species-accent)] underline"
-            href={PLAYGROUND_URL}
-            target="_blank"
-            rel="noreferrer"
-          >
-            Open in the playground →
-          </a>
-        </div>
+      <div className="cartridge flex flex-col items-center gap-4 p-6 text-center">
+        <p aria-hidden className="text-3xl">🛰</p>
+        <p className="font-pixel text-xs uppercase tracking-wider text-foreground">
+          Open inside the Circles host
+        </p>
+        <p className="max-w-sm text-xs text-muted-foreground">
+          Hatch lives inside the Circles miniapp host. Open it through the
+          playground — your wallet will be ready.
+        </p>
+        <a
+          href={PLAYGROUND_URL}
+          target="_blank"
+          rel="noreferrer"
+          className="btn-pixel font-pixel rounded-md bg-[var(--species-accent)] px-5 py-2.5 text-[11px] uppercase tracking-wider text-[var(--cream)] hover:bg-[oklch(0.66_0.18_220)]"
+        >
+          Open in the playground →
+        </a>
       </div>
     );
   }
