@@ -49,10 +49,15 @@ export function QrCode({
 
   return (
     <div
-      className="cartridge-sm relative grid place-items-center bg-[var(--cream)] p-3"
+      className="relative grid place-items-center rounded-lg border-2 border-[var(--ink)] bg-white p-3"
       role="img"
       aria-label={alt}
-      style={{ width: size + 26, height: size + 26 }}
+      style={{
+        width: size + 26,
+        height: size + 26,
+        boxShadow:
+          "0 4px 0 0 var(--ink), 0 12px 24px -8px oklch(0 0 0 / 0.55)",
+      }}
     >
       {svg ? (
         <div
@@ -61,7 +66,7 @@ export function QrCode({
         />
       ) : (
         <div
-          className="grid place-items-center text-[10px] uppercase tracking-wider text-muted-foreground"
+          className="grid place-items-center text-[10px] uppercase tracking-wider text-neutral-500"
           style={{ width: size, height: size }}
         >
           …

@@ -71,7 +71,7 @@ export function EggSelectModal({
 
   return (
     <div
-      className="fixed inset-0 z-50 grid place-items-center bg-black/65 backdrop-blur-sm p-4"
+      className="fixed inset-0 z-[100] grid place-items-center bg-black/70 backdrop-blur-md p-4"
       role="dialog"
       aria-modal="true"
     >
