@@ -29,17 +29,18 @@ export type SdkState =
 const SdkContext = createContext<SdkState>({ kind: "idle" });
 
 /**
- * Lazily builds an `@aboutcircles/sdk` instance + the user's Avatar once a
- * wallet is injected by the host. Re-builds on address change.
+ * Builds an `@aboutcircles/sdk` instance + (best-effort) the user's Avatar.
  *
- * Detection of "is this address a registered Circles avatar" uses
- * `sdk.rpc.profile.getProfileView()` (the documented read primitive,
- * which returns `undefined` for unregistered EOAs instead of throwing).
- * The Avatar instance is built separately via `sdk.getAvatar()` so write
- * methods (mint, transfer, trust) have a working ContractRunner. If
- * `getAvatar` throws for a registered avatar (happens when the on-chain
- * cidV0Digest is empty), we keep `hasAvatar=true` and leave avatar=null;
- * write components surface that gracefully.
+ * Avatar detection is permissive: we try the documented read primitive
+ * (`sdk.rpc.profile.getProfileView` returns `undefined` for unregistered
+ * EOAs, no throw) *and* the write builder (`sdk.getAvatar` throws for
+ * unregistered EOAs). If *either* succeeds, hasAvatar=true.
+ *
+ * Why both: passkey-Safe accounts (Metri) sometimes return without an
+ * `avatarInfo` from getProfileView even when they're fully registered
+ * — likely an indexer freshness quirk. getAvatar still resolves them.
+ * Treating either signal as authoritative avoids false-negative
+ * "you need a Circles avatar" CTAs for real Circles users.
  */
 export function SdkProvider({ children }: { children: ReactNode }) {
   const { address } = useWallet();
@@ -67,10 +68,8 @@ export function SdkProvider({ children }: { children: ReactNode }) {
           runner?: unknown,
         ) => unknown)(undefined, runner);
 
-        // ── Detection: is this a registered Circles avatar?
-        // Use the read-friendly view, NOT getAvatar — getAvatar throws
-        // for valid-but-empty profiles, which would lock out fresh users.
-        let hasAvatar = false;
+        // Probe 1: documented read primitive (no throw for unregistered EOAs).
+        let detectedViaView = false;
         try {
           const view = await (
             sdk as {
@@ -83,26 +82,26 @@ export function SdkProvider({ children }: { children: ReactNode }) {
               };
             }
           ).rpc.profile.getProfileView(address as Address);
-          hasAvatar = !!view.avatarInfo;
+          detectedViaView = !!view.avatarInfo;
         } catch (err) {
-          console.warn("[SdkProvider] getProfileView failed:", err);
+          console.warn("[SdkProvider] getProfileView threw:", err);
         }
 
-        // ── Write-capable Avatar instance — best-effort. If it throws
-        // even when hasAvatar is true, write components show an error
-        // when the user tries to act, but reads still work.
+        // Probe 2: write-capable Avatar (throws "Avatar not found" for
+        // unregistered EOAs, but works for some V2 avatars that
+        // getProfileView misses).
         let avatar: LooseSdk | null = null;
-        if (hasAvatar) {
-          try {
-            avatar = await (sdk as { getAvatar: (a: Address) => Promise<LooseSdk> })
-              .getAvatar(address as Address);
-          } catch (err) {
-            console.warn(
-              "[SdkProvider] getAvatar failed for registered avatar:",
-              err,
-            );
+        try {
+          avatar = await (sdk as { getAvatar: (a: Address) => Promise<LooseSdk> })
+            .getAvatar(address as Address);
+        } catch (err) {
+          // Only warn if the first probe also said no — silent otherwise.
+          if (!detectedViaView) {
+            console.warn("[SdkProvider] getAvatar threw:", err);
           }
         }
+
+        const hasAvatar = detectedViaView || !!avatar;
 
         if (cancelled) return;
         setState({
